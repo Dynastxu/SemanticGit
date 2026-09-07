@@ -9,7 +9,7 @@
         <version>${revision}</version>
     </parent>
 
-    <artifactId>semanticgit-core</artifactId>
+    <artifactId>semanticgit-git</artifactId>
 
     <properties>
         <maven.compiler.source>21</maven.compiler.source>

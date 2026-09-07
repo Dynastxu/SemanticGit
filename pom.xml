@@ -6,17 +6,22 @@
 
     <groupId>dynastxu</groupId>
     <artifactId>semanticgit</artifactId>
-    <version>0.0.0</version>
+    <version>${revision}</version>
     <packaging>pom</packaging>
     <modules>
-        <module>semanticgit-core</module>
         <module>semanticgit-ui</module>
+        <module>semanticgit-git</module>
+        <module>semanticgit-common</module>
+        <module>semanticgit-parser-api</module>
+        <module>semanticgit-parser-java</module>
+        <module>semanticgit-core</module>
     </modules>
 
     <properties>
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <revision>0.0.0</revision>
     </properties>
 
     <dependencyManagement>
@@ -46,10 +51,29 @@
                 <artifactId>jspecify</artifactId>
                 <version>1.0.1</version>
             </dependency>
+            <dependency>
+                <groupId>org.openjfx</groupId>
+                <artifactId>javafx-controls</artifactId>
+                <version>21.0.12</version>
+            </dependency>
+            <dependency>
+                <groupId>org.openjfx</groupId>
+                <artifactId>javafx-fxml</artifactId>
+                <version>21.0.12</version>
+            </dependency>
+            <dependency>
+                <groupId>org.jetbrains</groupId>
+                <artifactId>annotations</artifactId>
+                <version>26.0.2</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 
     <dependencies>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
@@ -58,6 +82,16 @@
         <dependency>
             <groupId>org.jspecify</groupId>
             <artifactId>jspecify</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.jetbrains</groupId>
+            <artifactId>annotations</artifactId>
+            <scope>compile</scope>
         </dependency>
     </dependencies>
 
