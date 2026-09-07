@@ -15,6 +15,9 @@
         <module>semanticgit-parser-api</module>
         <module>semanticgit-parser-java</module>
         <module>semanticgit-core</module>
+        <module>semanticgit-parser-python</module>
+        <module>semanticgit-parser-cpp</module>
+        <module>semanticgit-cli</module>
     </modules>
 
     <properties>
