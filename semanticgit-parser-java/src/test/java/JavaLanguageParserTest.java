@@ -1,3 +1,5 @@
+import com.github.javaparser.ParseResult;
+import com.github.javaparser.ast.CompilationUnit;
 import entity.DataQuality;
 import entity.Entity;
 import entity.EntityKind;
@@ -283,7 +285,7 @@ class JavaLanguageParserTest {
                 .build();
 
         JavaParserConfig config = JavaParserConfig.builder()
-                .timeoutMs(1)
+                .timeoutMs(0)
                 .build();
 
         ParsingResult result = parser.parse(sourceCode, config);
@@ -462,5 +464,38 @@ class JavaLanguageParserTest {
                 .filter(e -> e.getKind() == EntityKind.METHOD)
                 .toList();
         assertEquals(2, methods.size());
+    }
+
+    @Test
+    @DisplayName("AST 解析 OOM 但正则回退成功应返回 REGEX 级别")
+    void testParseOOMWithRegexFallbackSuccess() {
+        JavaLanguageParser oomParser = new JavaLanguageParser() {
+            @Override
+            protected ParseResult<CompilationUnit> parseWithAST(String content) {
+                throw new OutOfMemoryError("Simulated Java heap space");
+            }
+        };
+
+        String javaCode = """
+            package com.example;
+
+            public class RecoverableClass {
+                public void someMethod() {
+                }
+            }
+            """;
+
+        SourceCode sourceCode = SourceCode.builder()
+                .filePath("com/example/RecoverableClass.java")
+                .content(javaCode)
+                .language(EntityLanguage.JAVA)
+                .build();
+
+        JavaParserConfig config = JavaParserConfig.builder().build();
+        ParsingResult result = oomParser.parse(sourceCode, config);
+
+        assertNotNull(result);
+        assertEquals(DataQuality.FILE, result.getQuality());
+        assertTrue(result.getQualityRemark().contains("OUT_OF_MEMORY"));
     }
 }

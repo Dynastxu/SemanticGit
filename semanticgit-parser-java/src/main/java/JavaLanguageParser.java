@@ -19,16 +19,34 @@ import java.util.concurrent.*;
 @Slf4j
 public class JavaLanguageParser implements LanguageParser<JavaParserConfig> {
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private static final ParsingResult OOM_FALLBACK = ParsingResult.builder()
+            .entities(Collections.emptyList())
+            .quality(DataQuality.FILE)
+            .qualityRemark("OUT_OF_MEMORY")
+            .parseDurationMs(0)
+            .build();
 
     @Override
     public ParsingResult parse(@NonNull SourceCode sourceCode, JavaParserConfig config) {
         // 使用超时机制，防止解析卡死
         Future<ParsingResult> future = executor.submit(() -> {
             try {
-                return doParse(sourceCode);
+                return doParse(sourceCode, config);
             } catch (Exception e) {
                 log.error("Parse error for {}: {}", sourceCode.getFilePath(), e.getMessage());
                 return buildFallbackResult(DataQuality.FILE, "CRASHED: " + e.getClass().getSimpleName());
+            } catch (OutOfMemoryError e) {
+                System.gc();
+
+                // 短暂让出 CPU，给 GC 时间执行
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException ignored) {
+                    Thread.currentThread().interrupt();
+                }
+
+                log.error("Out of memory when parsing {}: {}", sourceCode.getFilePath(), e.getMessage());
+                return OOM_FALLBACK;
             }
         });
 
@@ -52,55 +70,74 @@ public class JavaLanguageParser implements LanguageParser<JavaParserConfig> {
     /**
      * 核心解析逻辑（三级容错）
      */
-    private ParsingResult doParse(@NonNull SourceCode sourceCode) {
+    private ParsingResult doParse(@NonNull SourceCode sourceCode, JavaParserConfig config) {
         long startTime = System.currentTimeMillis();
         String content = sourceCode.getContent();
+        String remark = "NO_ENTITIES_FOUND";
 
         // 空文件直接返回文件级结果
         if (content == null || content.trim().isEmpty()) {
             return buildFallbackResult(DataQuality.FILE, "EMPTY_FILE");
         }
 
-        // === Level 1: 尝试 AST 完美解析 ===
-        ParseResult<CompilationUnit> parseResult = parseWithAST(content);
+        long sizeInBytes = sourceCode.getSizeInBytes();
+        ParseResult<CompilationUnit> parseResult = null;
+        if (sizeInBytes > config.getMaxParseSizeBytes()) {
+            log.warn("File too large for AST parsing ({} bytes): {}, falling back to regex",
+                    sizeInBytes, sourceCode.getFilePath());
+            remark = "AST_TOO_LARGE";
+        } else {
+            // Level 1: 尝试 AST 完美解析
+            parseResult = parseWithAST(content);
 
-        if (parseResult.isSuccessful() && parseResult.getResult().isPresent()) {
-            CompilationUnit cu = parseResult.getResult().get();
-            List<Entity> entities = extractEntities(cu);
+            if (parseResult.isSuccessful() && parseResult.getResult().isPresent()) {
+                CompilationUnit cu = parseResult.getResult().get();
+                List<Entity> entities = extractEntities(cu);
 
-            if (!entities.isEmpty()) {
-                // 完美解析成功
-                return ParsingResult.builder()
-                        .entities(entities)
-                        .quality(DataQuality.AST)
-                        .qualityRemark("AST_SUCCESS")
-                        .parseDurationMs(System.currentTimeMillis() - startTime)
-                        .build();
-            } else {
-                // AST 解析成功但未提取到实体（可能是纯接口或空类）
-                return buildFallbackResult(DataQuality.REGEX, "AST_NO_ENTITIES");
+                if (!entities.isEmpty()) {
+                    // 完美解析成功
+                    return ParsingResult.builder()
+                            .entities(entities)
+                            .quality(DataQuality.AST)
+                            .qualityRemark("AST_SUCCESS")
+                            .parseDurationMs(System.currentTimeMillis() - startTime)
+                            .build();
+                } else {
+                    // AST 解析成功但未提取到实体（可能是纯接口或空类）
+                    return buildFallbackResult(DataQuality.REGEX, "AST_NO_ENTITIES");
+                }
             }
         }
 
-        // === Level 2: 正则回退（AST 部分失败） ===
-        List<Entity> regexEntities = extractWithRegex(content, sourceCode.getFilePath());
-        if (!regexEntities.isEmpty()) {
-            return ParsingResult.builder()
-                    .entities(regexEntities)
-                    .quality(DataQuality.REGEX)
-                    .qualityRemark("REGEX_FALLBACK" + (parseResult.getProblems().isEmpty() ? "" : ": " + parseResult.getProblems().get(0).getMessage()))
-                    .parseDurationMs(System.currentTimeMillis() - startTime)
-                    .build();
+        if (parseResult != null) {
+            remark = "REGEX_FALLBACK" + (parseResult.getProblems().isEmpty() ? "" : ": " + parseResult.getProblems().getFirst().getMessage());
         }
 
-        // === Level 3: 文件级兜底 ===
-        return buildFallbackResult(DataQuality.FILE, "NO_ENTITIES_FOUND");
+        if (sizeInBytes > config.getMaxRegexSizeBytes()) {
+            log.warn("File too large for regex parsing ({} bytes): {}, falling back to file",
+                    sizeInBytes, sourceCode.getFilePath());
+            remark = "REGEX_TOO_LARGE";
+        } else {
+            // Level 2: 正则回退（AST 部分失败）
+            List<Entity> regexEntities = extractWithRegex(content);
+            if (!regexEntities.isEmpty()) {
+                return ParsingResult.builder()
+                        .entities(regexEntities)
+                        .quality(DataQuality.REGEX)
+                        .qualityRemark(remark)
+                        .parseDurationMs(System.currentTimeMillis() - startTime)
+                        .build();
+            }
+        }
+
+        // Level 3: 文件级兜底
+        return buildFallbackResult(DataQuality.FILE, remark);
     }
 
     /**
      * Level 1: 使用 JavaParser 进行 AST 解析
      */
-    private ParseResult<CompilationUnit> parseWithAST(String content) {
+    protected ParseResult<CompilationUnit> parseWithAST(String content) {
         ParserConfiguration parserConfig = new ParserConfiguration();
         parserConfig.setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17); // 可配置化
         parserConfig.setStoreTokens(true); // 便于调试
@@ -113,7 +150,7 @@ public class JavaLanguageParser implements LanguageParser<JavaParserConfig> {
      * Level 2: 正则表达式提取（降级方案）
      * 仅提取类名和方法签名，不关心方法体是否正确
      */
-    private @NonNull List<Entity> extractWithRegex(String content, String filePath) {
+    private @NonNull List<Entity> extractWithRegex(String content) {
         List<Entity> entities = new ArrayList<>();
 
         // 提取类名（包括内部类）
