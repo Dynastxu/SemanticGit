@@ -17,15 +17,15 @@ import java.util.Optional;
 import java.util.concurrent.*;
 
 @Slf4j
-public class JavaLanguageParser implements LanguageParser {
+public class JavaLanguageParser implements LanguageParser<JavaParserConfig> {
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
     @Override
-    public ParsingResult parse(@NonNull SourceCode sourceCode, ParserConfig config) {
+    public ParsingResult parse(@NonNull SourceCode sourceCode, JavaParserConfig config) {
         // 使用超时机制，防止解析卡死
         Future<ParsingResult> future = executor.submit(() -> {
             try {
-                return doParse(sourceCode, config);
+                return doParse(sourceCode);
             } catch (Exception e) {
                 log.error("Parse error for {}: {}", sourceCode.getFilePath(), e.getMessage());
                 return buildFallbackResult(DataQuality.FILE, "CRASHED: " + e.getClass().getSimpleName());
@@ -52,7 +52,7 @@ public class JavaLanguageParser implements LanguageParser {
     /**
      * 核心解析逻辑（三级容错）
      */
-    private ParsingResult doParse(@NonNull SourceCode sourceCode, ParserConfig config) {
+    private ParsingResult doParse(@NonNull SourceCode sourceCode) {
         long startTime = System.currentTimeMillis();
         String content = sourceCode.getContent();
 
@@ -62,7 +62,7 @@ public class JavaLanguageParser implements LanguageParser {
         }
 
         // === Level 1: 尝试 AST 完美解析 ===
-        ParseResult<CompilationUnit> parseResult = parseWithAST(content, config);
+        ParseResult<CompilationUnit> parseResult = parseWithAST(content);
 
         if (parseResult.isSuccessful() && parseResult.getResult().isPresent()) {
             CompilationUnit cu = parseResult.getResult().get();
@@ -78,7 +78,7 @@ public class JavaLanguageParser implements LanguageParser {
                         .build();
             } else {
                 // AST 解析成功但未提取到实体（可能是纯接口或空类）
-                return buildFallbackResult(DataQuality.REGEXP, "AST_NO_ENTITIES");
+                return buildFallbackResult(DataQuality.REGEX, "AST_NO_ENTITIES");
             }
         }
 
@@ -87,7 +87,7 @@ public class JavaLanguageParser implements LanguageParser {
         if (!regexEntities.isEmpty()) {
             return ParsingResult.builder()
                     .entities(regexEntities)
-                    .quality(DataQuality.REGEXP)
+                    .quality(DataQuality.REGEX)
                     .qualityRemark("REGEX_FALLBACK" + (parseResult.getProblems().isEmpty() ? "" : ": " + parseResult.getProblems().get(0).getMessage()))
                     .parseDurationMs(System.currentTimeMillis() - startTime)
                     .build();
@@ -100,7 +100,7 @@ public class JavaLanguageParser implements LanguageParser {
     /**
      * Level 1: 使用 JavaParser 进行 AST 解析
      */
-    private ParseResult<CompilationUnit> parseWithAST(String content, ParserConfig config) {
+    private ParseResult<CompilationUnit> parseWithAST(String content) {
         ParserConfiguration parserConfig = new ParserConfiguration();
         parserConfig.setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17); // 可配置化
         parserConfig.setStoreTokens(true); // 便于调试

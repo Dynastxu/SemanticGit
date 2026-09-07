@@ -40,7 +40,7 @@ class JavaLanguageParserTest {
                 .language(EntityLanguage.JAVA)
                 .build();
 
-        ParserConfig config = ParserConfig.builder().build();
+        JavaParserConfig config = JavaParserConfig.builder().build();
         ParsingResult result = parser.parse(sourceCode, config);
 
         assertEquals(DataQuality.FILE, result.getQuality());
@@ -57,7 +57,7 @@ class JavaLanguageParserTest {
                 .language(EntityLanguage.JAVA)
                 .build();
 
-        ParserConfig config = ParserConfig.builder().build();
+        JavaParserConfig config = JavaParserConfig.builder().build();
         ParsingResult result = parser.parse(sourceCode, config);
 
         assertEquals(DataQuality.FILE, result.getQuality());
@@ -74,7 +74,7 @@ class JavaLanguageParserTest {
                 .language(EntityLanguage.JAVA)
                 .build();
 
-        ParserConfig config = ParserConfig.builder().build();
+        JavaParserConfig config = JavaParserConfig.builder().build();
         ParsingResult result = parser.parse(sourceCode, config);
 
         assertEquals(DataQuality.FILE, result.getQuality());
@@ -104,7 +104,7 @@ class JavaLanguageParserTest {
                 .language(EntityLanguage.JAVA)
                 .build();
 
-        ParserConfig config = ParserConfig.builder().build();
+        JavaParserConfig config = JavaParserConfig.builder().build();
         ParsingResult result = parser.parse(sourceCode, config);
 
         assertEquals(DataQuality.AST, result.getQuality());
@@ -151,7 +151,7 @@ class JavaLanguageParserTest {
                 .language(EntityLanguage.JAVA)
                 .build();
 
-        ParserConfig config = ParserConfig.builder().build();
+        JavaParserConfig config = JavaParserConfig.builder().build();
         ParsingResult result = parser.parse(sourceCode, config);
 
         assertEquals(DataQuality.AST, result.getQuality());
@@ -190,7 +190,7 @@ class JavaLanguageParserTest {
                 .language(EntityLanguage.JAVA)
                 .build();
 
-        ParserConfig config = ParserConfig.builder().build();
+        JavaParserConfig config = JavaParserConfig.builder().build();
         ParsingResult result = parser.parse(sourceCode, config);
 
         assertEquals(DataQuality.AST, result.getQuality());
@@ -222,7 +222,7 @@ class JavaLanguageParserTest {
                 .language(EntityLanguage.JAVA)
                 .build();
 
-        ParserConfig config = ParserConfig.builder().build();
+        JavaParserConfig config = JavaParserConfig.builder().build();
         ParsingResult result = parser.parse(sourceCode, config);
 
         assertNotNull(result.getQuality());
@@ -252,7 +252,7 @@ class JavaLanguageParserTest {
                 .language(EntityLanguage.JAVA)
                 .build();
 
-        ParserConfig config = ParserConfig.builder().build();
+        JavaParserConfig config = JavaParserConfig.builder().build();
         ParsingResult result = parser.parse(sourceCode, config);
 
         assertNotNull(result.getQuality());
@@ -282,7 +282,7 @@ class JavaLanguageParserTest {
                 .language(EntityLanguage.JAVA)
                 .build();
 
-        ParserConfig config = ParserConfig.builder()
+        JavaParserConfig config = JavaParserConfig.builder()
                 .timeoutMs(1)
                 .build();
 
@@ -316,7 +316,7 @@ class JavaLanguageParserTest {
                 .language(EntityLanguage.JAVA)
                 .build();
 
-        ParserConfig config = ParserConfig.builder().build();
+        JavaParserConfig config = JavaParserConfig.builder().build();
         ParsingResult result = parser.parse(sourceCode, config);
 
         assertEquals(DataQuality.AST, result.getQuality());
@@ -350,7 +350,7 @@ class JavaLanguageParserTest {
                 .language(EntityLanguage.JAVA)
                 .build();
 
-        ParserConfig config = ParserConfig.builder().build();
+        JavaParserConfig config = JavaParserConfig.builder().build();
         ParsingResult result = parser.parse(sourceCode, config);
 
         assertEquals(DataQuality.AST, result.getQuality());
@@ -391,7 +391,7 @@ class JavaLanguageParserTest {
                 .language(EntityLanguage.JAVA)
                 .build();
 
-        ParserConfig config = ParserConfig.builder().build();
+        JavaParserConfig config = JavaParserConfig.builder().build();
         ParsingResult result = parser.parse(sourceCode, config);
 
         assertEquals(DataQuality.AST, result.getQuality());
@@ -413,7 +413,7 @@ class JavaLanguageParserTest {
                 .language(EntityLanguage.JAVA)
                 .build();
 
-        ParserConfig config = ParserConfig.builder().build();
+        JavaParserConfig config = JavaParserConfig.builder().build();
         ParsingResult result = parser.parse(sourceCode, config);
 
         assertNotNull(result);
@@ -448,7 +448,7 @@ class JavaLanguageParserTest {
                 .language(EntityLanguage.JAVA)
                 .build();
 
-        ParserConfig config = ParserConfig.builder().build();
+        JavaParserConfig config = JavaParserConfig.builder().build();
         ParsingResult result = parser.parse(sourceCode, config);
 
         assertEquals(DataQuality.AST, result.getQuality());

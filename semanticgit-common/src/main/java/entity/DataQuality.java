@@ -4,7 +4,7 @@ import org.jspecify.annotations.NonNull;
 
 public enum DataQuality {
     AST(0, "AST"),
-    REGEXP(1, "REGEXP"),
+    REGEX(1, "REGEX"),
     FILE(2, "FILE");
 
     public final int code;
