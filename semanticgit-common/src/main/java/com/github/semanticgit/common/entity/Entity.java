@@ -4,7 +4,6 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import org.jspecify.annotations.NonNull;
 
 @Data
 @Builder
@@ -33,12 +32,5 @@ public class Entity {
      * <p>
      * 例如：方法所属的类ID
      */
-    private Long parentId;
-
-    public static class EntityBuilder {
-        public EntityBuilder parentId(@NonNull Entity entity) {
-            this.parentId = entity.getId();
-            return this;
-        }
-    }
+    private Entity parent;
 }
