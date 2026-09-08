@@ -55,7 +55,13 @@ public class AnalysisEngine {
             Map<String, CommitMeta> commitMetaMap = commits.stream()
                     .collect(Collectors.toMap(CommitMeta::getHash, c -> c));
 
-            List<GitCommitInfo> commitInfos = gitService.getCommitsBetween(firstHash, lastHash);
+            List<GitCommitInfo> commitInfos;
+            if (firstHash.equals(lastHash)) {
+                GitCommitInfo info = gitService.getCommitInfo(firstHash);
+                commitInfos = Collections.singletonList(info);
+            } else {
+                commitInfos = gitService.getCommitsBetween(firstHash, lastHash);
+            }
 
             ChangeLogDao changeLogDao = new ChangeLogDaoImpl(dbManager);
             ParserRegistry parserRegistry = new ParserRegistry();

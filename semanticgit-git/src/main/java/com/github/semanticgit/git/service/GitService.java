@@ -109,7 +109,21 @@ public class GitService implements AutoCloseable {
     }
 
     /**
-     * 获取两个提交之间的逐提交列表（用于增量分析）
+     * 获取单个提交的完整信息（含 diff），用于初始提交等场景
+     */
+    public GitCommitInfo getCommitInfo(String hash) throws IOException, IllegalArgumentException {
+        ObjectId commitId = repository.resolve(hash);
+        if (commitId == null) {
+            throw new IllegalArgumentException("Invalid hash: " + hash);
+        }
+        try (RevWalk walk = new RevWalk(repository)) {
+            RevCommit rev = walk.parseCommit(commitId);
+            return buildCommitInfo(rev);
+        }
+    }
+
+    /**
+     * 获取两个提交之间的逐提交列表（不含 fromHash，用于增量分析）
      */
     public List<GitCommitInfo> getCommitsBetween(String fromHash, String toHash) throws IOException, IllegalArgumentException {
         ObjectId fromId = repository.resolve(fromHash);
@@ -122,7 +136,6 @@ public class GitService implements AutoCloseable {
         List<GitCommitInfo> commitInfos = new ArrayList<>();
         try (RevWalk walk = new RevWalk(repository)) {
             RevCommit fromCommit = walk.parseCommit(fromId);
-            commitInfos.add(buildCommitInfo(fromCommit));
 
             walk.markStart(walk.parseCommit(toId));
             walk.markUninteresting(fromCommit);
