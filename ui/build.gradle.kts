@@ -17,5 +17,6 @@ compose.desktop {
 dependencies {
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)
+    implementation(compose.materialIconsExtended)
     implementation(project(":core"))
 }
