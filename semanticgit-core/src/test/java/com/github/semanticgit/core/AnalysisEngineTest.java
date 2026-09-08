@@ -179,6 +179,286 @@ class AnalysisEngineTest {
         }
     }
 
+    @Test
+    @DisplayName("非源码文件（.txt）提交不应产生 ChangeLog 记录")
+    void fullAnalysis_NonSourceFile_NoChangeLog() throws Exception {
+        tempRepoDir = Files.createTempDirectory("semanticgit-test-non-source");
+        tempDbDir = Files.createTempDirectory("semanticgit-test-db");
+
+        createTestRepoWithCommits(tempRepoDir);
+
+        boolean result = engine.fullAnalysis(
+                tempRepoDir.toString(),
+                tempDbDir.toString()
+        );
+        assertTrue(result, "分析应成功");
+
+        String repoName = Integer.toHexString(
+                new File(tempRepoDir.toAbsolutePath().toString()).getAbsolutePath().hashCode()
+        );
+        File dbFile = new File(tempDbDir.toFile(), repoName + ".db");
+
+        try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + dbFile.getAbsolutePath().replace("\\", "/"));
+             Statement stmt = conn.createStatement()) {
+
+            try (ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM change_log")) {
+                assertTrue(rs.next());
+                assertEquals(0, rs.getInt(1), ".txt 文件不应产生 ChangeLog 记录");
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("Java 源码新增提交应产生 ADD 类型的 ChangeLog 记录")
+    void fullAnalysis_JavaFileAdded_CreatesAddChangeLogs() throws Exception {
+        tempRepoDir = Files.createTempDirectory("semanticgit-test-java-add");
+        tempDbDir = Files.createTempDirectory("semanticgit-test-db");
+
+        git = Git.init().setDirectory(tempRepoDir.toFile()).call();
+
+        Path javaFile = tempRepoDir.resolve("Hello.java");
+        Files.writeString(javaFile, """
+                public class Hello {
+                    public void greet() {
+                        System.out.println("Hello");
+                    }
+                }
+                """);
+        git.add().addFilepattern("Hello.java").call();
+        PersonIdent author = new PersonIdent("Dev", "dev@example.com");
+        git.commit()
+                .setAuthor(author)
+                .setCommitter(author)
+                .setMessage("Add Hello.java")
+                .call();
+
+        boolean result = engine.fullAnalysis(
+                tempRepoDir.toString(),
+                tempDbDir.toString()
+        );
+        assertTrue(result, "分析应成功");
+
+        String repoName = Integer.toHexString(
+                new File(tempRepoDir.toAbsolutePath().toString()).getAbsolutePath().hashCode()
+        );
+        File dbFile = new File(tempDbDir.toFile(), repoName + ".db");
+
+        try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + dbFile.getAbsolutePath().replace("\\", "/"));
+             Statement stmt = conn.createStatement()) {
+
+            try (ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM change_log")) {
+                assertTrue(rs.next());
+                assertTrue(rs.getInt(1) > 0, "Java 文件应产生 ChangeLog 记录");
+            }
+
+            try (ResultSet rs = stmt.executeQuery(
+                    "SELECT cl.file_path, cl.operation, e.name, e.kind " +
+                            "FROM change_log cl JOIN entity e ON cl.entity_id = e.id " +
+                            "WHERE cl.operation = " + com.github.semanticgit.common.entity.ChangeOperation.ADD.code)) {
+                boolean hasAdd = false;
+                while (rs.next()) {
+                    hasAdd = true;
+                    assertEquals("Hello.java", rs.getString("file_path"));
+                    assertEquals(com.github.semanticgit.common.entity.ChangeOperation.ADD.code, rs.getInt("operation"));
+                }
+                assertTrue(hasAdd, "应有 ADD 类型的 ChangeLog");
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("Java 源码修改提交应正确识别 ADD/REMOVE/MODIFY 实体变更")
+    void fullAnalysis_JavaFileModified_DetectsEntityChanges() throws Exception {
+        tempRepoDir = Files.createTempDirectory("semanticgit-test-java-modify");
+        tempDbDir = Files.createTempDirectory("semanticgit-test-db");
+
+        git = Git.init().setDirectory(tempRepoDir.toFile()).call();
+
+        Path javaFile = tempRepoDir.resolve("Service.java");
+        Files.writeString(javaFile, """
+                public class Service {
+                    public void oldMethod() {
+                    }
+                
+                    public void keepMethod() {
+                    }
+                }
+                """);
+        git.add().addFilepattern("Service.java").call();
+        PersonIdent author = new PersonIdent("Dev", "dev@example.com");
+        git.commit()
+                .setAuthor(author)
+                .setCommitter(author)
+                .setMessage("Add Service.java with oldMethod and keepMethod")
+                .call();
+
+        Files.writeString(javaFile, """
+                public class Service {
+                    public void newMethod() {
+                    }
+                
+                    public void keepMethod() {
+                    }
+                }
+                """);
+        git.add().addFilepattern("Service.java").call();
+        git.commit()
+                .setAuthor(author)
+                .setCommitter(author)
+                .setMessage("Replace oldMethod with newMethod, keep keepMethod")
+                .call();
+
+        boolean result = engine.fullAnalysis(
+                tempRepoDir.toString(),
+                tempDbDir.toString()
+        );
+        assertTrue(result, "分析应成功");
+
+        String repoName = Integer.toHexString(
+                new File(tempRepoDir.toAbsolutePath().toString()).getAbsolutePath().hashCode()
+        );
+        File dbFile = new File(tempDbDir.toFile(), repoName + ".db");
+
+        try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + dbFile.getAbsolutePath().replace("\\", "/"));
+             Statement stmt = conn.createStatement()) {
+
+            try (ResultSet rs = stmt.executeQuery(
+                    "SELECT e.name, cl.operation FROM change_log cl " +
+                            "JOIN entity e ON cl.entity_id = e.id " +
+                            "ORDER BY e.name")) {
+                List<String> changes = new ArrayList<>();
+                while (rs.next()) {
+                    changes.add(rs.getString("name") + ":" + rs.getInt("operation"));
+                }
+                assertFalse(changes.isEmpty(), "应有 ChangeLog 记录");
+
+                boolean hasRemoveOldMethod = changes.stream()
+                        .anyMatch(c -> c.contains("oldMethod") && c.contains(String.valueOf(com.github.semanticgit.common.entity.ChangeOperation.REMOVE.code)));
+                boolean hasAddNewMethod = changes.stream()
+                        .anyMatch(c -> c.contains("newMethod") && c.contains(String.valueOf(com.github.semanticgit.common.entity.ChangeOperation.ADD.code)));
+                boolean hasModifyKeepMethod = changes.stream()
+                        .anyMatch(c -> c.contains("keepMethod") && c.contains(String.valueOf(com.github.semanticgit.common.entity.ChangeOperation.MODIFY.code)));
+
+                assertTrue(hasRemoveOldMethod, "oldMethod 应被标记为 REMOVE");
+                assertTrue(hasAddNewMethod, "newMethod 应被标记为 ADD");
+                assertTrue(hasModifyKeepMethod, "keepMethod 应被标记为 MODIFY");
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("Java 源码删除提交应产生 REMOVE 类型的 ChangeLog")
+    void fullAnalysis_JavaFileDeleted_CreatesRemoveChangeLogs() throws Exception {
+        tempRepoDir = Files.createTempDirectory("semanticgit-test-java-delete");
+        tempDbDir = Files.createTempDirectory("semanticgit-test-db");
+
+        git = Git.init().setDirectory(tempRepoDir.toFile()).call();
+
+        Path javaFile = tempRepoDir.resolve("ToDelete.java");
+        Files.writeString(javaFile, """
+                public class ToDelete {
+                    public void method() {
+                    }
+                }
+                """);
+        git.add().addFilepattern("ToDelete.java").call();
+        PersonIdent author = new PersonIdent("Dev", "dev@example.com");
+        git.commit()
+                .setAuthor(author)
+                .setCommitter(author)
+                .setMessage("Add ToDelete.java")
+                .call();
+
+        Files.delete(javaFile);
+        git.rm().addFilepattern("ToDelete.java").call();
+        git.commit()
+                .setAuthor(author)
+                .setCommitter(author)
+                .setMessage("Delete ToDelete.java")
+                .call();
+
+        boolean result = engine.fullAnalysis(
+                tempRepoDir.toString(),
+                tempDbDir.toString()
+        );
+        assertTrue(result, "分析应成功");
+
+        String repoName = Integer.toHexString(
+                new File(tempRepoDir.toAbsolutePath().toString()).getAbsolutePath().hashCode()
+        );
+        File dbFile = new File(tempDbDir.toFile(), repoName + ".db");
+
+        try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + dbFile.getAbsolutePath().replace("\\", "/"));
+             Statement stmt = conn.createStatement()) {
+
+            try (ResultSet rs = stmt.executeQuery(
+                    "SELECT cl.operation, e.name FROM change_log cl " +
+                            "JOIN entity e ON cl.entity_id = e.id " +
+                            "WHERE cl.operation = " + com.github.semanticgit.common.entity.ChangeOperation.REMOVE.code)) {
+                boolean hasRemove = false;
+                while (rs.next()) {
+                    hasRemove = true;
+                    assertEquals(com.github.semanticgit.common.entity.ChangeOperation.REMOVE.code, rs.getInt("operation"));
+                }
+                assertTrue(hasRemove, "应有 REMOVE 类型的 ChangeLog");
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("混合源码和非源码提交，非源码文件被跳过不影响分析")
+    void fullAnalysis_MixedSourceAndNonSource_SkipsNonSource() throws Exception {
+        tempRepoDir = Files.createTempDirectory("semanticgit-test-mixed");
+        tempDbDir = Files.createTempDirectory("semanticgit-test-db");
+
+        git = Git.init().setDirectory(tempRepoDir.toFile()).call();
+
+        Path javaFile = tempRepoDir.resolve("App.java");
+        Files.writeString(javaFile, """
+                public class App {
+                    public static void main(String[] args) {
+                    }
+                }
+                """);
+        Files.writeString(tempRepoDir.resolve("README.md"), "# Test Project");
+        git.add().addFilepattern(".").call();
+        PersonIdent author = new PersonIdent("Dev", "dev@example.com");
+        git.commit()
+                .setAuthor(author)
+                .setCommitter(author)
+                .setMessage("Add App.java and README.md")
+                .call();
+
+        boolean result = engine.fullAnalysis(
+                tempRepoDir.toString(),
+                tempDbDir.toString()
+        );
+        assertTrue(result, "分析应成功");
+
+        String repoName = Integer.toHexString(
+                new File(tempRepoDir.toAbsolutePath().toString()).getAbsolutePath().hashCode()
+        );
+        File dbFile = new File(tempDbDir.toFile(), repoName + ".db");
+
+        try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + dbFile.getAbsolutePath().replace("\\", "/"));
+             Statement stmt = conn.createStatement()) {
+
+            try (ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM change_log")) {
+                assertTrue(rs.next());
+                assertTrue(rs.getInt(1) > 0, "Java 文件应产生 ChangeLog");
+
+                try (ResultSet rs2 = stmt.executeQuery(
+                        "SELECT DISTINCT file_path FROM change_log")) {
+                    while (rs2.next()) {
+                        String filePath = rs2.getString("file_path");
+                        assertTrue(filePath.endsWith(".java"),
+                                "ChangeLog 应只包含 .java 文件，但发现: " + filePath);
+                    }
+                }
+            }
+        }
+    }
+
     private List<CommitMeta> createTestRepoWithCommits(Path repoDir) throws Exception {
         List<CommitMeta> commits = new ArrayList<>();
 

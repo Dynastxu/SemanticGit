@@ -63,6 +63,33 @@ public class DatabaseManager implements AutoCloseable {
                             FOREIGN KEY (author_id) REFERENCES author(id)
                         )
                     """);
+
+            stmt.execute("""
+                        CREATE TABLE IF NOT EXISTS entity (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            name TEXT NOT NULL,
+                            language INTEGER NOT NULL,
+                            kind INTEGER NOT NULL,
+                            UNIQUE(name, language, kind)
+                        )
+                    """);
+
+            stmt.execute("""
+                        CREATE TABLE IF NOT EXISTS change_log (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            commit_id INTEGER NOT NULL,
+                            entity_id INTEGER NOT NULL,
+                            file_path TEXT NOT NULL,
+                            operation INTEGER NOT NULL,
+                            nature_flag INTEGER DEFAULT 0,
+                            parent_entity_id INTEGER,
+                            data_quality INTEGER NOT NULL,
+                            analysis_type INTEGER NOT NULL,
+                            FOREIGN KEY (commit_id) REFERENCES commit_meta(id),
+                            FOREIGN KEY (entity_id) REFERENCES entity(id),
+                            FOREIGN KEY (parent_entity_id) REFERENCES entity(id)
+                        )
+                    """);
             log.info("Database tables initialized successfully");
         }
     }

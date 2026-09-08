@@ -121,31 +121,35 @@ public class GitService implements AutoCloseable {
 
         List<GitCommitInfo> commitInfos = new ArrayList<>();
         try (RevWalk walk = new RevWalk(repository)) {
+            RevCommit fromCommit = walk.parseCommit(fromId);
+            commitInfos.add(buildCommitInfo(fromCommit));
+
             walk.markStart(walk.parseCommit(toId));
-            walk.markUninteresting(walk.parseCommit(fromId)); // 排除 from 之前的提交
+            walk.markUninteresting(fromCommit);
 
             for (RevCommit rev : walk) {
-                GitCommitInfo info = new GitCommitInfo();
-                info.setCommitHash(rev.getId().getName());
-                info.setAuthorName(rev.getAuthorIdent().getName());
-                info.setAuthorEmail(rev.getAuthorIdent().getEmailAddress());
-                info.setTimestamp(rev.getCommitTime());
-                info.setFullMessage(rev.getFullMessage());
-
-                // 【重要】获取该提交与其父提交的 Diff（即这一提交改了什么）
-                if (rev.getParentCount() > 0) {
-                    ObjectId parentTree = rev.getParent(0).getTree().getId();
-                    ObjectId currentTree = rev.getTree().getId();
-                    List<GitDiffEntry> diffs = getDiffBetweenTrees(parentTree, currentTree);
-                    info.setDiffEntries(diffs);
-                } else {
-                    // 初始提交：所有文件都是 ADD
-                    info.setDiffEntries(getAllFilesAsAdd(rev.getTree().getId()));
-                }
-                commitInfos.add(info);
+                commitInfos.add(buildCommitInfo(rev));
             }
         }
         return commitInfos;
+    }
+
+    private GitCommitInfo buildCommitInfo(RevCommit rev) throws IOException {
+        GitCommitInfo info = new GitCommitInfo();
+        info.setCommitHash(rev.getId().getName());
+        info.setAuthorName(rev.getAuthorIdent().getName());
+        info.setAuthorEmail(rev.getAuthorIdent().getEmailAddress());
+        info.setTimestamp(rev.getCommitTime());
+        info.setFullMessage(rev.getFullMessage());
+
+        if (rev.getParentCount() > 0) {
+            ObjectId parentTree = rev.getParent(0).getTree().getId();
+            ObjectId currentTree = rev.getTree().getId();
+            info.setDiffEntries(getDiffBetweenTrees(parentTree, currentTree));
+        } else {
+            info.setDiffEntries(getAllFilesAsAdd(rev.getTree().getId()));
+        }
+        return info;
     }
 
     private List<GitDiffEntry> getDiffBetweenTrees(ObjectId fromTree, ObjectId toTree) throws IOException {
