@@ -4,7 +4,7 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
     <parent>
-        <groupId>dynastxu</groupId>
+        <groupId>com.github.semanticgit</groupId>
         <artifactId>semanticgit</artifactId>
         <version>${revision}</version>
     </parent>
@@ -23,7 +23,7 @@
             <artifactId>org.eclipse.jgit</artifactId>
         </dependency>
         <dependency>
-            <groupId>dynastxu</groupId>
+            <groupId>com.github.semanticgit</groupId>
             <artifactId>semanticgit-common</artifactId>
             <version>${revision}</version>
         </dependency>
