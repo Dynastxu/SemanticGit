@@ -1,5 +1,7 @@
 package com.github.semanticgit.git.service;
 
+import com.github.semanticgit.common.entity.Author;
+import com.github.semanticgit.common.entity.CommitMeta;
 import com.github.semanticgit.git.dto.GitCommitInfo;
 import com.github.semanticgit.git.dto.GitDiffEntry;
 import com.github.semanticgit.common.entity.ChangeOperation;
@@ -461,5 +463,92 @@ class GitServiceTest {
         GitCommitInfo c4 = commits.getFirst();
         assertEquals(1, c4.getDiffEntries().size());
         assertEquals("d.txt", c4.getDiffEntries().getFirst().getNewPath());
+    }
+
+    // ======================== getAllCommits 测试 ========================
+
+    @Test
+    @DisplayName("空仓库（无 HEAD）应返回空列表")
+    void testGetAllCommitsEmptyRepo() throws Exception {
+        gitService = new GitService(tempDir.toString());
+        List<CommitMeta> commits = gitService.getAllCommits();
+
+        assertNotNull(commits);
+        assertTrue(commits.isEmpty());
+    }
+
+    @Test
+    @DisplayName("单个提交应返回包含该提交的列表")
+    void testGetAllCommitsSingleCommit() throws Exception {
+        String hash = commitFile("test.txt", "test", "single commit");
+
+        gitService = new GitService(tempDir.toString());
+        List<CommitMeta> commits = gitService.getAllCommits();
+
+        assertNotNull(commits);
+        assertEquals(1, commits.size());
+
+        CommitMeta meta = commits.getFirst();
+        assertEquals(hash, meta.getHash());
+        assertEquals("single commit", meta.getMessage());
+        assertNotNull(meta.getAuthor());
+        assertEquals("Test User", meta.getAuthor().getName());
+        assertEquals("test@example.com", meta.getAuthor().getEmail());
+        assertTrue(meta.getTimestamp() > 0);
+    }
+
+    @Test
+    @DisplayName("多个提交应全部返回，且按时间倒序排列")
+    void testGetAllCommitsMultipleCommits() throws Exception {
+        String hash1 = commitFile("a.txt", "A", "first");
+        String hash2 = commitFile("b.txt", "B", "second");
+        String hash3 = commitFile("c.txt", "C", "third");
+
+        gitService = new GitService(tempDir.toString());
+        List<CommitMeta> commits = gitService.getAllCommits();
+
+        assertNotNull(commits);
+        assertEquals(3, commits.size());
+
+        assertEquals(hash3, commits.get(0).getHash());
+        assertEquals(hash2, commits.get(1).getHash());
+        assertEquals(hash1, commits.get(2).getHash());
+    }
+
+    @Test
+    @DisplayName("提交元数据应包含正确的 author、email、timestamp 和 message")
+    void testGetAllCommitsMetadataCorrect() throws Exception {
+        commitFile("test.txt", "test", "metadata test");
+
+        gitService = new GitService(tempDir.toString());
+        List<CommitMeta> commits = gitService.getAllCommits();
+
+        assertEquals(1, commits.size());
+        CommitMeta meta = commits.getFirst();
+
+        assertNotNull(meta.getAuthor());
+        assertEquals("Test User", meta.getAuthor().getName());
+        assertEquals("test@example.com", meta.getAuthor().getEmail());
+        assertTrue(meta.getTimestamp() > 0);
+        assertEquals("metadata test", meta.getMessage());
+    }
+
+    @Test
+    @DisplayName("同一作者多次提交时 Author 对象应复用")
+    void testGetAllCommitsAuthorDeduplication() throws Exception {
+        commitFile("a.txt", "A", "first");
+        commitFile("b.txt", "B", "second");
+        commitFile("c.txt", "C", "third");
+
+        gitService = new GitService(tempDir.toString());
+        List<CommitMeta> commits = gitService.getAllCommits();
+
+        assertEquals(3, commits.size());
+        Author firstAuthor = commits.get(0).getAuthor();
+        Author secondAuthor = commits.get(1).getAuthor();
+        Author thirdAuthor = commits.get(2).getAuthor();
+
+        assertSame(firstAuthor, secondAuthor);
+        assertSame(firstAuthor, thirdAuthor);
     }
 }

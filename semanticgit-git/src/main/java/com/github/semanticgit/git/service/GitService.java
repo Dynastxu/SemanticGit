@@ -1,5 +1,7 @@
 package com.github.semanticgit.git.service;
 
+import com.github.semanticgit.common.entity.Author;
+import com.github.semanticgit.common.entity.CommitMeta;
 import com.github.semanticgit.git.dto.GitCommitInfo;
 import com.github.semanticgit.git.dto.GitDiffEntry;
 import com.github.semanticgit.common.entity.ChangeOperation;
@@ -35,6 +37,37 @@ public class GitService implements AutoCloseable {
                 .findGitDir()
                 .build();
         this.git = new Git(repository);
+    }
+
+    public List<CommitMeta> getAllCommits() throws IOException {
+        List<CommitMeta> result = new ArrayList<>();
+        List<Author> authors = new ArrayList<>();
+        try (RevWalk walk = new RevWalk(repository)) {
+            ObjectId headId = repository.resolve("HEAD");
+            if (headId == null) {
+                return result;
+            }
+            walk.markStart(walk.parseCommit(headId));
+            for (RevCommit rev : walk) {
+                Author author = Author.builder()
+                        .name(rev.getAuthorIdent().getName())
+                        .email(rev.getAuthorIdent().getEmailAddress())
+                        .build();
+                if (!authors.contains(author)) {
+                    authors.add(author);
+                } else {
+                    author = authors.get(authors.indexOf(author));
+                }
+                CommitMeta meta = CommitMeta.builder()
+                        .hash(rev.getId().getName())
+                        .author(author)
+                        .timestamp(rev.getCommitTime())
+                        .message(rev.getFullMessage())
+                        .build();
+                result.add(meta);
+            }
+        }
+        return result;
     }
 
     /**
