@@ -1,3 +1,8 @@
+pluginManagement {
+    plugins {
+        kotlin("plugin.lombok") version "2.1.20"
+    }
+}
 rootProject.name = "semanticgit"
 
 include(

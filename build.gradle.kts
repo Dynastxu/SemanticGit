@@ -1,6 +1,9 @@
 plugins {
     `java-library`
     id("io.freefair.lombok") version "8.13" apply false
+    kotlin("jvm") version "2.3.20" apply false
+    id("org.jetbrains.compose") version "1.9.3" apply false
+    id("org.jetbrains.kotlin.plugin.compose") version "2.3.20" apply false
 }
 
 allprojects {
@@ -9,10 +12,13 @@ allprojects {
 
     repositories {
         mavenCentral()
+        google()
     }
 }
 
 subprojects {
+    if (name == "semanticgit-ui") return@subprojects
+
     apply(plugin = "java-library")
     apply(plugin = "io.freefair.lombok")
 
