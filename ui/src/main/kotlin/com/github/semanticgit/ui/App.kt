@@ -25,6 +25,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import cafe.adriel.lyricist.ProvideStrings
+import cafe.adriel.lyricist.rememberStrings
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -36,18 +38,28 @@ import androidx.compose.ui.window.rememberWindowState
 fun main() = application {
     Window(
         onCloseRequest = ::exitApplication,
-        title = I18n.t("app.title"),
+        title = "SemanticGit",
         state = rememberWindowState(width = 1200.dp, height = 800.dp),
         undecorated = true
     ) {
         var themeMode by remember { mutableStateOf(ThemeMode.Dark) }
 
-        SemanticGitTheme(themeMode = themeMode) {
-            SemanticGitApp(
-                themeMode = themeMode,
-                onToggleTheme = { themeMode = if (themeMode == ThemeMode.Dark) ThemeMode.Light else ThemeMode.Dark },
-                onClose = ::exitApplication
-            )
+        val lyricist = rememberStrings(
+            translations = mapOf(
+                "zh" to ZhStrings,
+                "en" to EnStrings
+            ),
+            defaultLanguageTag = "zh"
+        )
+
+        ProvideStrings(lyricist, LocalStrings) {
+            SemanticGitTheme(themeMode = themeMode) {
+                SemanticGitApp(
+                    themeMode = themeMode,
+                    onToggleTheme = { themeMode = if (themeMode == ThemeMode.Dark) ThemeMode.Light else ThemeMode.Dark },
+                    onClose = ::exitApplication
+                )
+            }
         }
     }
 }
@@ -59,30 +71,31 @@ private fun WindowScope.SemanticGitApp(
     onClose: () -> Unit
 ) {
     var selectedIndex by remember { mutableStateOf(0) }
+    val strings = LocalStrings.current
 
     val navItems = listOf(
         NavItem(
             selectedIcon = FilledIcons.Folder,
             unselectedIcon = OutlinedIcons.Folder,
-            title = I18n.t("nav.repository"),
+            title = strings.navRepository,
             onClick = { selectedIndex = 0 }
         ),
         NavItem(
             selectedIcon = FilledIcons.Commit,
             unselectedIcon = OutlinedIcons.Commit,
-            title = I18n.t("nav.commit"),
+            title = strings.navCommit,
             onClick = { selectedIndex = 1 }
         ),
         NavItem(
             selectedIcon = FilledIcons.History,
             unselectedIcon = OutlinedIcons.History,
-            title = I18n.t("nav.history"),
+            title = strings.navHistory,
             onClick = { selectedIndex = 2 }
         ),
         NavItem(
             selectedIcon = FilledIcons.Build,
             unselectedIcon = OutlinedIcons.Build,
-            title = I18n.t("nav.tools"),
+            title = strings.navTools,
             onClick = { selectedIndex = 3 }
         )
     )
@@ -91,7 +104,7 @@ private fun WindowScope.SemanticGitApp(
         NavItem(
             selectedIcon = FilledIcons.Settings,
             unselectedIcon = OutlinedIcons.Settings,
-            title = I18n.t("nav.settings"),
+            title = strings.navSettings,
             onClick = { selectedIndex = 4 }
         )
     )
@@ -100,7 +113,7 @@ private fun WindowScope.SemanticGitApp(
 
     Column(modifier = Modifier.fillMaxSize()) {
         TitleBar(
-            title = I18n.t("app.title"),
+            title = strings.appTitle,
             themeMode = themeMode,
             onToggleTheme = onToggleTheme,
             onClose = onClose

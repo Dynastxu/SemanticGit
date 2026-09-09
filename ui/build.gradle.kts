@@ -19,4 +19,5 @@ dependencies {
     implementation(compose.material3)
     implementation(compose.materialIconsExtended)
     implementation(project(":core"))
+    implementation("cafe.adriel.lyricist:lyricist:1.8.0")
 }

@@ -35,6 +35,7 @@ fun WindowScope.TitleBar(
     modifier: Modifier = Modifier
 ) {
     val frame = remember { window as Frame }
+    val strings = LocalStrings.current
 
     WindowDraggableArea(
         modifier = modifier
@@ -62,7 +63,7 @@ fun WindowScope.TitleBar(
                 ) {
                     Icon(
                         imageVector = if (themeMode == ThemeMode.Dark) Icons.Default.DarkMode else Icons.Default.LightMode,
-                        contentDescription = if (themeMode == ThemeMode.Dark) I18n.t("titlebar.toggle_light") else I18n.t("titlebar.toggle_dark")
+                        contentDescription = if (themeMode == ThemeMode.Dark) strings.titlebarToggleLight else strings.titlebarToggleDark
                     )
                 }
 
@@ -72,7 +73,7 @@ fun WindowScope.TitleBar(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Minimize,
-                        contentDescription = I18n.t("titlebar.minimize")
+                        contentDescription = strings.titlebarMinimize
                     )
                 }
 
@@ -88,7 +89,7 @@ fun WindowScope.TitleBar(
                 ) {
                     Icon(
                         imageVector = Icons.Default.CropSquare,
-                        contentDescription = I18n.t("titlebar.maximize")
+                        contentDescription = strings.titlebarMaximize
                     )
                 }
 
@@ -98,7 +99,7 @@ fun WindowScope.TitleBar(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Close,
-                        contentDescription = I18n.t("titlebar.close")
+                        contentDescription = strings.titlebarClose
                     )
                 }
             }
