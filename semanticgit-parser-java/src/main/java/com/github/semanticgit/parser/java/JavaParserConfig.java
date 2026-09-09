@@ -1,6 +1,6 @@
-package com.github.semanticgit.parser;
+package com.github.semanticgit.parser.java;
 
-import com.github.semanticgit.parser.api.ParserConfig;
+import com.github.semanticgit.parser.java.api.ParserConfig;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.experimental.SuperBuilder;

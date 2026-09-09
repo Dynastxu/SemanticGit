@@ -2,12 +2,12 @@ package com.github.semanticgit.core;
 
 import com.github.semanticgit.common.entity.DataQuality;
 import com.github.semanticgit.common.entity.EntityLanguage;
-import com.github.semanticgit.parser.JavaLanguageParser;
-import com.github.semanticgit.parser.JavaParserConfig;
-import com.github.semanticgit.parser.api.LanguageParser;
-import com.github.semanticgit.parser.api.ParserConfig;
-import com.github.semanticgit.parser.api.ParsingResult;
-import com.github.semanticgit.parser.api.SourceCode;
+import com.github.semanticgit.parser.java.JavaLanguageParser;
+import com.github.semanticgit.parser.java.JavaParserConfig;
+import com.github.semanticgit.parser.java.api.LanguageParser;
+import com.github.semanticgit.parser.java.api.ParserConfig;
+import com.github.semanticgit.parser.java.api.ParsingResult;
+import com.github.semanticgit.parser.java.api.SourceCode;
 
 import java.util.Collections;
 import java.util.EnumMap;

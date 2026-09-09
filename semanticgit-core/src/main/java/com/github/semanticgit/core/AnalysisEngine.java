@@ -16,8 +16,8 @@ import com.github.semanticgit.core.db.DatabaseManager;
 import com.github.semanticgit.git.dto.GitCommitInfo;
 import com.github.semanticgit.git.dto.GitDiffEntry;
 import com.github.semanticgit.git.service.GitService;
-import com.github.semanticgit.parser.api.ParsingResult;
-import com.github.semanticgit.parser.api.SourceCode;
+import com.github.semanticgit.parser.java.api.ParsingResult;
+import com.github.semanticgit.parser.java.api.SourceCode;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.File;

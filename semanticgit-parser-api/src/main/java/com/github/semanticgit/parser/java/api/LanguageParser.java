@@ -1,4 +1,4 @@
-package com.github.semanticgit.parser.api;
+package com.github.semanticgit.parser.java.api;
 
 import com.github.semanticgit.common.entity.EntityLanguage;
 
