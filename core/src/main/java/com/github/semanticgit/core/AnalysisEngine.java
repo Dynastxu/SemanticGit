@@ -5,7 +5,6 @@ import com.github.semanticgit.common.entity.ChangeLog;
 import com.github.semanticgit.common.entity.ChangeNatureFlag;
 import com.github.semanticgit.common.entity.ChangeOperation;
 import com.github.semanticgit.common.entity.CommitMeta;
-import com.github.semanticgit.common.entity.DataQuality;
 import com.github.semanticgit.common.entity.Entity;
 import com.github.semanticgit.common.entity.EntityLanguage;
 import com.github.semanticgit.core.dao.ChangeLogDao;
