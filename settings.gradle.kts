@@ -6,13 +6,13 @@ pluginManagement {
 rootProject.name = "semanticgit"
 
 include(
-    "semanticgit-common",
-    "semanticgit-parser-api",
-    "semanticgit-parser-java",
-    "semanticgit-parser-cpp",
-    "semanticgit-parser-python",
-    "semanticgit-git",
-    "semanticgit-core",
-    "semanticgit-ui",
-    "semanticgit-cli"
+    "common",
+    "parser:api",
+    "parser:java",
+    "parser:cpp",
+    "parser:python",
+    "git",
+    "core",
+    "ui",
+    "cli"
 )

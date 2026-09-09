@@ -17,5 +17,5 @@ compose.desktop {
 dependencies {
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)
-    implementation(project(":semanticgit-core"))
+    implementation(project(":core"))
 }

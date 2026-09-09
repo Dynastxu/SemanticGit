@@ -1,5 +1,5 @@
 dependencies {
-    api(project(":semanticgit-parser-java"))
-    api(project(":semanticgit-git"))
+    api(project(":parser:java"))
+api(project(":git"))
     implementation("org.xerial:sqlite-jdbc:${property("sqliteVersion")}")
 }

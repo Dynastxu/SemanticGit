@@ -17,7 +17,7 @@ allprojects {
 }
 
 subprojects {
-    if (name == "semanticgit-ui") return@subprojects
+    if (name == "ui") return@subprojects
 
     apply(plugin = "java-library")
     apply(plugin = "io.freefair.lombok")

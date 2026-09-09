@@ -1,4 +1,4 @@
 dependencies {
-    api(project(":semanticgit-common"))
+    api(project(":common"))
     api("org.eclipse.jgit:org.eclipse.jgit:${property("jgitVersion")}")
 }
