@@ -1,6 +1,6 @@
 plugins {
     `java-library`
-    id("io.freefair.lombok") version "8.13" apply false
+    id("io.freefair.lombok") version "9.5.0" apply false
     kotlin("jvm") version "2.3.20" apply false
     id("org.jetbrains.compose") version "1.9.3" apply false
     id("org.jetbrains.kotlin.plugin.compose") version "2.3.20" apply false
@@ -8,7 +8,7 @@ plugins {
 
 allprojects {
     group = "com.github.semanticgit"
-    version = property("revision") as String
+    version = property("vision") as String
 
     repositories {
         mavenCentral()
@@ -24,7 +24,7 @@ subprojects {
 
     java {
         toolchain {
-            languageVersion.set(JavaLanguageVersion.of(21))
+            languageVersion.set(JavaLanguageVersion.of(25))
         }
     }
 

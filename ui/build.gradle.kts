@@ -5,12 +5,13 @@ plugins {
 }
 
 kotlin {
-    jvmToolchain(21)
+    jvmToolchain(25)
 }
 
 compose.desktop {
     application {
         mainClass = "com.github.semanticgit.ui.AppKt"
+        jvmArgs += listOf("--enable-native-access=ALL-UNNAMED")
     }
 }
 

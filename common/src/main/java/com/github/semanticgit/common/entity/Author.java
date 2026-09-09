@@ -23,4 +23,9 @@ public class Author {
         }
         return false;
     }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(name, email);
+    }
 }
