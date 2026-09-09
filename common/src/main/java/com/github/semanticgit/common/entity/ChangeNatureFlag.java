@@ -5,10 +5,13 @@ import org.jspecify.annotations.NonNull;
 import java.util.EnumSet;
 
 public enum ChangeNatureFlag {
-    LOGICAL(0),
-    REFACTOR(1),
-    STYLE(2),
-    DOC(3)
+    FEAT(0),
+    FIX(1),
+    REFACTOR(2),
+    PERF(3),
+    STYLE(4),
+    TEST(5),
+    DOCS(6)
     ;
 
     public final int code;

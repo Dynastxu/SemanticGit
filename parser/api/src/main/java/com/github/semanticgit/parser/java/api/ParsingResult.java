@@ -1,5 +1,6 @@
 package com.github.semanticgit.parser.java.api;
 
+import com.github.semanticgit.common.entity.ChangeLog;
 import com.github.semanticgit.common.entity.DataQuality;
 import com.github.semanticgit.common.entity.Entity;
 import lombok.Builder;
@@ -11,7 +12,7 @@ import java.util.List;
 @Builder
 public class ParsingResult {
     /**
-     * 提取到的实体列表（类/方法），可能为空
+     * 提取到的实体列表（类/方法）
      */
     private List<Entity> entities;
 

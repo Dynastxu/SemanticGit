@@ -1,6 +1,7 @@
 package com.github.semanticgit.parser.java;
 
-import com.github.semanticgit.parser.java.api.LanguageParser;
+import com.github.semanticgit.common.entity.*;
+import com.github.semanticgit.parser.java.api.AbstractParser;
 import com.github.semanticgit.parser.java.api.ParsingResult;
 import com.github.semanticgit.parser.java.api.SourceCode;
 import com.github.javaparser.*;
@@ -8,10 +9,7 @@ import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.nodeTypes.NodeWithName;
-import com.github.semanticgit.common.entity.DataQuality;
-import com.github.semanticgit.common.entity.Entity;
-import com.github.semanticgit.common.entity.EntityKind;
-import com.github.semanticgit.common.entity.EntityLanguage;
+import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.NonNull;
 
@@ -22,7 +20,8 @@ import java.util.Optional;
 import java.util.concurrent.*;
 
 @Slf4j
-public class JavaLanguageParser implements LanguageParser<JavaParserConfig> {
+@NoArgsConstructor
+public class JavaLanguageParser extends AbstractParser<JavaParserConfig> {
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private static final ParsingResult OOM_FALLBACK = ParsingResult.builder()
             .entities(Collections.emptyList())
@@ -31,12 +30,16 @@ public class JavaLanguageParser implements LanguageParser<JavaParserConfig> {
             .parseDurationMs(0)
             .build();
 
+    public JavaLanguageParser(JavaParserConfig config) {
+        super(config);
+    }
+
     @Override
-    public ParsingResult parse(@NonNull SourceCode sourceCode, JavaParserConfig config) {
+    public ParsingResult parseEntities(@NonNull SourceCode sourceCode) {
         // 使用超时机制，防止解析卡死
         Future<ParsingResult> future = executor.submit(() -> {
             try {
-                return doParse(sourceCode, config);
+                return doParse(sourceCode);
             } catch (Exception e) {
                 log.error("Parse error for {}: {}", sourceCode.getFilePath(), e.getMessage());
                 return buildFallbackResult(DataQuality.FILE, "CRASHED: " + e.getClass().getSimpleName());
@@ -75,7 +78,7 @@ public class JavaLanguageParser implements LanguageParser<JavaParserConfig> {
     /**
      * 核心解析逻辑（三级容错）
      */
-    private ParsingResult doParse(@NonNull SourceCode sourceCode, JavaParserConfig config) {
+    private ParsingResult doParse(@NonNull SourceCode sourceCode) {
         long startTime = System.currentTimeMillis();
         String content = sourceCode.getContent();
         String remark = "NO_ENTITIES_FOUND";
@@ -298,5 +301,71 @@ public class JavaLanguageParser implements LanguageParser<JavaParserConfig> {
                 .qualityRemark(remark)
                 .parseDurationMs(0)
                 .build();
+    }
+
+    @Override
+    public int parseChangeNatureFlag(SourceCode sourceCodeBefore, SourceCode sourceCodeAfter) {
+        // 保守实现：优先判断容易识别的类型
+
+        // 1. 判断是否为测试文件
+        if (isTestFile(sourceCodeAfter)) {
+            return ChangeNatureFlag.TEST.code;
+        }
+
+        // 2. 判断是否仅为样式变更（仅空白字符差异）
+        if (isStyleOnlyChange(sourceCodeBefore, sourceCodeAfter)) {
+            return ChangeNatureFlag.STYLE.code;
+        }
+
+        // 3. 判断是否仅为文档变更（仅注释差异）
+        if (isDocsOnlyChange(sourceCodeBefore, sourceCodeAfter)) {
+            return ChangeNatureFlag.DOCS.code;
+        }
+
+        // TODO: 实现更精确的变更类型判断
+        // - FEAT: 检测到新增方法/类
+        // - FIX: 方法体变更但签名不变
+        // - REFACTOR: 方法签名变更但逻辑相似
+        // - PERF: 检测到性能优化模式（如循环优化）
+        // 默认返回 FEAT
+        return ChangeNatureFlag.FEAT.code;
+    }
+
+    /**
+     * 判断是否为测试文件
+     */
+    private boolean isTestFile(SourceCode sourceCode) {
+        String filePath = sourceCode.getFilePath();
+        return filePath != null && (
+            filePath.contains("/test/") ||
+            filePath.contains("\\test\\") ||
+            filePath.endsWith("Test.java") ||
+            filePath.endsWith("Tests.java")
+        );
+    }
+
+    /**
+     * 判断是否仅为样式变更（去除空白后内容相同）
+     */
+    private boolean isStyleOnlyChange(SourceCode before, SourceCode after) {
+        if (before == null || after == null) {
+            return false;
+        }
+        String beforeNormalized = before.getContent().replaceAll("\\s+", "");
+        String afterNormalized = after.getContent().replaceAll("\\s+", "");
+        return beforeNormalized.equals(afterNormalized);
+    }
+
+    /**
+     * 判断是否仅为文档变更（去除注释后内容相同）
+     */
+    private boolean isDocsOnlyChange(SourceCode before, SourceCode after) {
+        if (before == null || after == null) {
+            return false;
+        }
+        // 移除单行和多行注释后比较
+        String beforeCode = before.getContent().replaceAll("//.*", "").replaceAll("/\\*.*?\\*/", "");
+        String afterCode = after.getContent().replaceAll("//.*", "").replaceAll("/\\*.*?\\*/", "");
+        return beforeCode.equals(afterCode);
     }
 }

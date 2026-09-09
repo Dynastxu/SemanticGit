@@ -13,13 +13,13 @@ import com.github.semanticgit.core.dao.CommitMetaDao;
 import com.github.semanticgit.core.dao.impl.ChangeLogDaoImpl;
 import com.github.semanticgit.core.dao.impl.CommitMetaDaoImpl;
 import com.github.semanticgit.core.db.DatabaseManager;
-import com.github.semanticgit.core.dto.SimpleEntityChangeStatistics;
+import com.github.semanticgit.core.parser.ParserRegistry;
 import com.github.semanticgit.git.dto.GitCommitInfo;
 import com.github.semanticgit.git.dto.GitDiffEntry;
 import com.github.semanticgit.git.service.GitService;
+import com.github.semanticgit.parser.java.api.LanguageParser;
 import com.github.semanticgit.parser.java.api.ParsingResult;
 import com.github.semanticgit.parser.java.api.SourceCode;
-import jdk.jshell.spi.ExecutionControl;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.NonNull;
@@ -27,9 +27,9 @@ import org.jspecify.annotations.NonNull;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -40,11 +40,11 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
     private String failMessage = "";
 
     @Override
-    public boolean fullAnalysis(String repoPath, String databasePath) {
+    public boolean fullAnalysis(String repoPath, String databaseDir) {
         String dbName = Integer.toHexString(new File(repoPath).getAbsolutePath().hashCode());
 
         try (GitService gitService = new GitService(repoPath);
-             DatabaseManager dbManager = new DatabaseManager(databasePath, dbName, true)) {
+             DatabaseManager dbManager = new DatabaseManager(databaseDir, dbName, true)) {
             List<CommitMeta> commits = gitService.getAllCommits();
             log.info("Fetched {} commits from repository", commits.size());
 
@@ -73,7 +73,6 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
             }
 
             ChangeLogDao changeLogDao = new ChangeLogDaoImpl(dbManager);
-            ParserRegistry parserRegistry = new ParserRegistry();
 
             for (int i = 0; i < commitInfos.size(); i++) {
                 GitCommitInfo info = commitInfos.get(i);
@@ -84,7 +83,7 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
                     continue;
                 }
 
-                List<ChangeLog> changeLogs = analyzeDiff(info.getDiffEntries(), commitMeta, parserRegistry);
+                List<ChangeLog> changeLogs = analyzeDiff(info.getDiffEntries(), commitMeta);
                 changeLogDao.saveAll(changeLogs);
 
                 log.info("Analyzed commit {}/{}: {} changes", i + 1, commitInfos.size(), changeLogs.size());
@@ -98,13 +97,7 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
         }
     }
 
-    @Override
-    public SimpleEntityChangeStatistics getSimpleEntityChangeStatistics(File databaseFile) {
-        // TODO: Implement this method
-        return SimpleEntityChangeStatistics.fail();
-    }
-
-    private @NonNull List<ChangeLog> analyzeDiff(@NonNull List<GitDiffEntry> diffs, CommitMeta commit, ParserRegistry parserRegistry) {
+    private @NonNull List<ChangeLog> analyzeDiff(@NonNull List<GitDiffEntry> diffs, CommitMeta commit) {
         List<ChangeLog> changeLogs = new ArrayList<>();
 
         for (GitDiffEntry diff : diffs) {
@@ -117,44 +110,97 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
 
             switch (diff.getChangeOperation()) {
                 case ADD -> {
-                    ParsingResult newResult = parseFile(diff.getNewContent(), filePath, language, parserRegistry);
-                    for (Entity entity : newResult.getEntities()) {
+                    SourceCode newCode = buildSourceCode(filePath, diff.getNewContent(), language);
+                    LanguageParser<?> parser = ParserRegistry.getParser(language);
+                    ParsingResult result = parser.parseEntities(newCode);
+
+                    for (Entity entity : result.getEntities()) {
                         entity.setLanguage(language);
-                        changeLogs.add(buildChangeLog(commit, entity, filePath,
-                                ChangeOperation.ADD, newResult));
+                        changeLogs.add(ChangeLog.builder()
+                                .commit(commit)
+                                .entity(entity)
+                                .filePath(filePath)
+                                .operation(ChangeOperation.ADD)
+                                .natureFlag(ChangeNatureFlag.FEAT)
+                                .dataQuality(result.getQuality())
+                                .analysisType(AnalysisType.INCREMENTAL)
+                                .build());
                     }
                 }
                 case REMOVE -> {
-                    ParsingResult oldResult = parseFile(diff.getOldContent(), filePath, language, parserRegistry);
-                    for (Entity entity : oldResult.getEntities()) {
+                    SourceCode oldCode = buildSourceCode(filePath, diff.getOldContent(), language);
+                    LanguageParser<?> parser = ParserRegistry.getParser(language);
+                    ParsingResult result = parser.parseEntities(oldCode);
+
+                    for (Entity entity : result.getEntities()) {
                         entity.setLanguage(language);
-                        changeLogs.add(buildChangeLog(commit, entity, filePath,
-                                ChangeOperation.REMOVE, oldResult));
+                        changeLogs.add(ChangeLog.builder()
+                                .commit(commit)
+                                .entity(entity)
+                                .filePath(filePath)
+                                .operation(ChangeOperation.REMOVE)
+                                .natureFlag(ChangeNatureFlag.FEAT)
+                                .dataQuality(result.getQuality())
+                                .analysisType(AnalysisType.INCREMENTAL)
+                                .build());
                     }
                 }
                 case MODIFY -> {
-                    ParsingResult oldResult = parseFile(diff.getOldContent(), filePath, language, parserRegistry);
-                    ParsingResult newResult = parseFile(diff.getNewContent(), filePath, language, parserRegistry);
+                    SourceCode oldCode = buildSourceCode(filePath, diff.getOldContent(), language);
+                    SourceCode newCode = buildSourceCode(filePath, diff.getNewContent(), language);
+                    LanguageParser<?> parser = ParserRegistry.getParser(language);
 
-                    Set<String> oldNames = entityNameSet(oldResult);
-                    Set<String> newNames = entityNameSet(newResult);
+                    ParsingResult oldResult = parser.parseEntities(oldCode);
+                    ParsingResult newResult = parser.parseEntities(newCode);
 
-                    for (Entity entity : oldResult.getEntities()) {
+                    int natureFlagCode = parser.parseChangeNatureFlag(oldCode, newCode);
+                    ChangeNatureFlag natureFlag = extractNatureFlag(natureFlagCode);
+
+                    Map<String, Entity> oldEntityMap = oldResult.getEntities().stream()
+                            .collect(Collectors.toMap(Entity::getName, e -> e, (a, _) -> a));
+                    Map<String, Entity> newEntityMap = newResult.getEntities().stream()
+                            .collect(Collectors.toMap(Entity::getName, e -> e, (a, _) -> a));
+
+                    for (Map.Entry<String, Entity> entry : newEntityMap.entrySet()) {
+                        Entity entity = entry.getValue();
                         entity.setLanguage(language);
-                        if (!newNames.contains(entity.getName())) {
-                            changeLogs.add(buildChangeLog(commit, entity, filePath,
-                                    ChangeOperation.REMOVE, oldResult));
+
+                        if (oldEntityMap.containsKey(entry.getKey())) {
+                            changeLogs.add(ChangeLog.builder()
+                                    .commit(commit)
+                                    .entity(entity)
+                                    .filePath(filePath)
+                                    .operation(ChangeOperation.MODIFY)
+                                    .natureFlag(natureFlag)
+                                    .dataQuality(newResult.getQuality())
+                                    .analysisType(AnalysisType.INCREMENTAL)
+                                    .build());
+                        } else {
+                            changeLogs.add(ChangeLog.builder()
+                                    .commit(commit)
+                                    .entity(entity)
+                                    .filePath(filePath)
+                                    .operation(ChangeOperation.ADD)
+                                    .natureFlag(natureFlag)
+                                    .dataQuality(newResult.getQuality())
+                                    .analysisType(AnalysisType.INCREMENTAL)
+                                    .build());
                         }
                     }
 
-                    for (Entity entity : newResult.getEntities()) {
-                        entity.setLanguage(language);
-                        if (!oldNames.contains(entity.getName())) {
-                            changeLogs.add(buildChangeLog(commit, entity, filePath,
-                                    ChangeOperation.ADD, newResult));
-                        } else {
-                            changeLogs.add(buildChangeLog(commit, entity, filePath,
-                                    ChangeOperation.MODIFY, newResult));
+                    for (Map.Entry<String, Entity> entry : oldEntityMap.entrySet()) {
+                        if (!newEntityMap.containsKey(entry.getKey())) {
+                            Entity entity = entry.getValue();
+                            entity.setLanguage(language);
+                            changeLogs.add(ChangeLog.builder()
+                                    .commit(commit)
+                                    .entity(entity)
+                                    .filePath(filePath)
+                                    .operation(ChangeOperation.REMOVE)
+                                    .natureFlag(natureFlag)
+                                    .dataQuality(oldResult.getQuality())
+                                    .analysisType(AnalysisType.INCREMENTAL)
+                                    .build());
                         }
                     }
                 }
@@ -164,43 +210,17 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
         return changeLogs;
     }
 
-    private ParsingResult parseFile(String content, String filePath, EntityLanguage language,
-                                     ParserRegistry parserRegistry) {
-        if (content == null || content.isEmpty()) {
-            return ParsingResult.builder()
-                    .entities(Collections.emptyList())
-                    .quality(DataQuality.FILE)
-                    .qualityRemark("EMPTY_CONTENT")
-                    .parseDurationMs(0)
-                    .build();
-        }
-
-        SourceCode sourceCode = SourceCode.builder()
+    private SourceCode buildSourceCode(String filePath, String content, EntityLanguage language) {
+        return SourceCode.builder()
                 .filePath(filePath)
                 .content(content)
                 .language(language)
-                .sizeInBytes(content.getBytes().length)
+                .sizeInBytes(content != null ? content.length() : 0)
                 .build();
-
-        return parserRegistry.parse(sourceCode);
     }
 
-    private Set<String> entityNameSet(@NonNull ParsingResult result) {
-        return result.getEntities().stream()
-                .map(Entity::getName)
-                .collect(Collectors.toSet());
-    }
-
-    private ChangeLog buildChangeLog(CommitMeta commit, Entity entity, String filePath,
-                                     ChangeOperation operation, @NonNull ParsingResult result) {
-        return ChangeLog.builder()
-                .commit(commit)
-                .entity(entity)
-                .filePath(filePath)
-                .operation(operation)
-                .natureFlag(ChangeNatureFlag.LOGICAL)
-                .dataQuality(result.getQuality())
-                .analysisType(AnalysisType.INCREMENTAL)
-                .build();
+    private ChangeNatureFlag extractNatureFlag(int code) {
+        EnumSet<ChangeNatureFlag> flags = ChangeNatureFlag.fromCode(code);
+        return flags.isEmpty() ? ChangeNatureFlag.FEAT : flags.iterator().next();
     }
 }

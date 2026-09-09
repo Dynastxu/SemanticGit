@@ -82,7 +82,7 @@ class ChangeLogDaoImplTest {
                         .build())
                 .filePath("src/main/java/com/example/Test.java")
                 .operation(ChangeOperation.ADD)
-                .natureFlag(ChangeNatureFlag.LOGICAL)
+                .natureFlag(ChangeNatureFlag.FEAT)
                 .dataQuality(DataQuality.AST)
                 .analysisType(AnalysisType.INCREMENTAL)
                 .build();
@@ -110,7 +110,7 @@ class ChangeLogDaoImplTest {
                 assertTrue(rs.next());
                 assertEquals("src/main/java/com/example/Test.java", rs.getString("file_path"));
                 assertEquals(ChangeOperation.ADD.code, rs.getInt("operation"));
-                assertEquals(ChangeNatureFlag.LOGICAL.code, rs.getInt("nature_flag"));
+                assertEquals(ChangeNatureFlag.FEAT.code, rs.getInt("nature_flag"));
                 assertEquals(DataQuality.AST.code, rs.getInt("data_quality"));
                 assertEquals(AnalysisType.INCREMENTAL.code, rs.getInt("analysis_type"));
                 assertEquals("com.example.Test#method", rs.getString("name"));
@@ -134,7 +134,7 @@ class ChangeLogDaoImplTest {
                 .entity(entity)
                 .filePath("Test.java")
                 .operation(ChangeOperation.ADD)
-                .natureFlag(ChangeNatureFlag.LOGICAL)
+                .natureFlag(ChangeNatureFlag.FEAT)
                 .dataQuality(DataQuality.AST)
                 .analysisType(AnalysisType.INCREMENTAL)
                 .build();
@@ -144,7 +144,7 @@ class ChangeLogDaoImplTest {
                 .entity(entity)
                 .filePath("Test.java")
                 .operation(ChangeOperation.MODIFY)
-                .natureFlag(ChangeNatureFlag.LOGICAL)
+                .natureFlag(ChangeNatureFlag.FEAT)
                 .dataQuality(DataQuality.AST)
                 .analysisType(AnalysisType.INCREMENTAL)
                 .build();
@@ -182,7 +182,7 @@ class ChangeLogDaoImplTest {
                             .build())
                     .filePath("File" + i + ".java")
                     .operation(ChangeOperation.ADD)
-                    .natureFlag(ChangeNatureFlag.LOGICAL)
+                    .natureFlag(ChangeNatureFlag.FEAT)
                     .dataQuality(DataQuality.AST)
                     .analysisType(AnalysisType.INCREMENTAL)
                     .build());
@@ -274,7 +274,7 @@ class ChangeLogDaoImplTest {
                         .build())
                 .filePath("Test.java")
                 .operation(ChangeOperation.ADD)
-                .natureFlag(ChangeNatureFlag.LOGICAL)
+                .natureFlag(ChangeNatureFlag.FEAT)
                 .dataQuality(DataQuality.FILE)
                 .analysisType(AnalysisType.INCREMENTAL)
                 .build();
@@ -296,7 +296,7 @@ class ChangeLogDaoImplTest {
                             .build())
                     .filePath("Test.java")
                     .operation(op)
-                    .natureFlag(ChangeNatureFlag.LOGICAL)
+                    .natureFlag(ChangeNatureFlag.FEAT)
                     .dataQuality(DataQuality.AST)
                     .analysisType(AnalysisType.INCREMENTAL)
                     .build();

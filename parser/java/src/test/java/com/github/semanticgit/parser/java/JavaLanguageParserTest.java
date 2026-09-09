@@ -17,15 +17,18 @@ import static org.junit.jupiter.api.Assertions.*;
 class JavaLanguageParserTest {
 
     private JavaLanguageParser parser;
+    private JavaLanguageParser timeoutParser;
 
     @BeforeEach
     void setUp() {
-        parser = new JavaLanguageParser();
+        parser = new JavaLanguageParser(JavaParserConfig.builder().build());
+        timeoutParser = new JavaLanguageParser(JavaParserConfig.builder().timeoutMs(0).build());
     }
 
     @AfterEach
     void tearDown() {
         parser = null;
+        timeoutParser = null;
     }
 
     @Test
@@ -43,8 +46,7 @@ class JavaLanguageParserTest {
                 .language(EntityLanguage.JAVA)
                 .build();
 
-        JavaParserConfig config = JavaParserConfig.builder().build();
-        ParsingResult result = parser.parse(sourceCode, config);
+        ParsingResult result = parser.parseEntities(sourceCode);
 
         Assertions.assertEquals(DataQuality.FILE, result.getQuality());
         Assertions.assertEquals("EMPTY_FILE", result.getQualityRemark());
@@ -60,8 +62,8 @@ class JavaLanguageParserTest {
                 .language(EntityLanguage.JAVA)
                 .build();
 
-        JavaParserConfig config = JavaParserConfig.builder().build();
-        ParsingResult result = parser.parse(sourceCode, config);
+
+        ParsingResult result = parser.parseEntities(sourceCode);
 
         Assertions.assertEquals(DataQuality.FILE, result.getQuality());
         Assertions.assertEquals("EMPTY_FILE", result.getQualityRemark());
@@ -77,8 +79,8 @@ class JavaLanguageParserTest {
                 .language(EntityLanguage.JAVA)
                 .build();
 
-        JavaParserConfig config = JavaParserConfig.builder().build();
-        ParsingResult result = parser.parse(sourceCode, config);
+
+        ParsingResult result = parser.parseEntities(sourceCode);
 
         Assertions.assertEquals(DataQuality.FILE, result.getQuality());
         Assertions.assertEquals("EMPTY_FILE", result.getQualityRemark());
@@ -107,8 +109,8 @@ class JavaLanguageParserTest {
                 .language(EntityLanguage.JAVA)
                 .build();
 
-        JavaParserConfig config = JavaParserConfig.builder().build();
-        ParsingResult result = parser.parse(sourceCode, config);
+
+        ParsingResult result = parser.parseEntities(sourceCode);
 
         Assertions.assertEquals(DataQuality.AST, result.getQuality());
         Assertions.assertEquals("AST_SUCCESS", result.getQualityRemark());
@@ -154,8 +156,8 @@ class JavaLanguageParserTest {
                 .language(EntityLanguage.JAVA)
                 .build();
 
-        JavaParserConfig config = JavaParserConfig.builder().build();
-        ParsingResult result = parser.parse(sourceCode, config);
+
+        ParsingResult result = parser.parseEntities(sourceCode);
 
         Assertions.assertEquals(DataQuality.AST, result.getQuality());
 
@@ -193,8 +195,8 @@ class JavaLanguageParserTest {
                 .language(EntityLanguage.JAVA)
                 .build();
 
-        JavaParserConfig config = JavaParserConfig.builder().build();
-        ParsingResult result = parser.parse(sourceCode, config);
+
+        ParsingResult result = parser.parseEntities(sourceCode);
 
         Assertions.assertEquals(DataQuality.AST, result.getQuality());
 
@@ -225,8 +227,8 @@ class JavaLanguageParserTest {
                 .language(EntityLanguage.JAVA)
                 .build();
 
-        JavaParserConfig config = JavaParserConfig.builder().build();
-        ParsingResult result = parser.parse(sourceCode, config);
+
+        ParsingResult result = parser.parseEntities(sourceCode);
 
         assertNotNull(result.getQuality());
         Assertions.assertTrue(result.getEntities().isEmpty());
@@ -255,8 +257,8 @@ class JavaLanguageParserTest {
                 .language(EntityLanguage.JAVA)
                 .build();
 
-        JavaParserConfig config = JavaParserConfig.builder().build();
-        ParsingResult result = parser.parse(sourceCode, config);
+
+        ParsingResult result = parser.parseEntities(sourceCode);
 
         assertNotNull(result.getQuality());
         Assertions.assertFalse(result.getEntities().isEmpty());
@@ -285,11 +287,7 @@ class JavaLanguageParserTest {
                 .language(EntityLanguage.JAVA)
                 .build();
 
-        JavaParserConfig config = JavaParserConfig.builder()
-                .timeoutMs(0)
-                .build();
-
-        ParsingResult result = parser.parse(sourceCode, config);
+        ParsingResult result = timeoutParser.parseEntities(sourceCode);
 
         Assertions.assertEquals(DataQuality.FILE, result.getQuality());
         Assertions.assertEquals("TIMEOUT", result.getQualityRemark());
@@ -319,8 +317,8 @@ class JavaLanguageParserTest {
                 .language(EntityLanguage.JAVA)
                 .build();
 
-        JavaParserConfig config = JavaParserConfig.builder().build();
-        ParsingResult result = parser.parse(sourceCode, config);
+
+        ParsingResult result = parser.parseEntities(sourceCode);
 
         Assertions.assertEquals(DataQuality.AST, result.getQuality());
 
@@ -353,8 +351,8 @@ class JavaLanguageParserTest {
                 .language(EntityLanguage.JAVA)
                 .build();
 
-        JavaParserConfig config = JavaParserConfig.builder().build();
-        ParsingResult result = parser.parse(sourceCode, config);
+
+        ParsingResult result = parser.parseEntities(sourceCode);
 
         Assertions.assertEquals(DataQuality.AST, result.getQuality());
 
@@ -394,8 +392,8 @@ class JavaLanguageParserTest {
                 .language(EntityLanguage.JAVA)
                 .build();
 
-        JavaParserConfig config = JavaParserConfig.builder().build();
-        ParsingResult result = parser.parse(sourceCode, config);
+
+        ParsingResult result = parser.parseEntities(sourceCode);
 
         Assertions.assertEquals(DataQuality.AST, result.getQuality());
 
@@ -416,8 +414,8 @@ class JavaLanguageParserTest {
                 .language(EntityLanguage.JAVA)
                 .build();
 
-        JavaParserConfig config = JavaParserConfig.builder().build();
-        ParsingResult result = parser.parse(sourceCode, config);
+
+        ParsingResult result = parser.parseEntities(sourceCode);
 
         assertNotNull(result);
         assertNotNull(result.getQuality());
@@ -451,8 +449,8 @@ class JavaLanguageParserTest {
                 .language(EntityLanguage.JAVA)
                 .build();
 
-        JavaParserConfig config = JavaParserConfig.builder().build();
-        ParsingResult result = parser.parse(sourceCode, config);
+
+        ParsingResult result = parser.parseEntities(sourceCode);
 
         Assertions.assertEquals(DataQuality.AST, result.getQuality());
 
@@ -470,7 +468,7 @@ class JavaLanguageParserTest {
     @Test
     @DisplayName("AST 解析 OOM 但正则回退成功应返回 REGEX 级别")
     void testParseOOMWithRegexFallbackSuccess() {
-        JavaLanguageParser oomParser = new JavaLanguageParser() {
+        JavaLanguageParser oomParser = new JavaLanguageParser(JavaParserConfig.builder().build()) {
             @Override
             protected ParseResult<CompilationUnit> parseWithAST(String content) {
                 throw new OutOfMemoryError("Simulated Java heap space");
@@ -492,8 +490,8 @@ class JavaLanguageParserTest {
                 .language(EntityLanguage.JAVA)
                 .build();
 
-        JavaParserConfig config = JavaParserConfig.builder().build();
-        ParsingResult result = oomParser.parse(sourceCode, config);
+
+        ParsingResult result = oomParser.parseEntities(sourceCode);
 
         assertNotNull(result);
         Assertions.assertEquals(DataQuality.FILE, result.getQuality());

@@ -1,16 +1,26 @@
 package com.github.semanticgit.parser.java.api;
 
+import com.github.semanticgit.common.entity.ChangeNatureFlag;
 import com.github.semanticgit.common.entity.EntityLanguage;
+
+import java.util.EnumSet;
 
 public interface LanguageParser<C extends ParserConfig> {
     /**
      * 解析源码文件，提取类、方法等实体信息。
-     * 实现者必须保证：无论如何都不抛出运行时异常，必须返回 api.ParsingResult。
      */
-    ParsingResult parse(SourceCode sourceCode, C config);
+    ParsingResult parseEntities(SourceCode sourceCode);
 
     /**
-     * 声明该解析器支持的语言类型，用于工厂模式自动路由。
+     * 声明该解析器支持的语言类型
      */
     EntityLanguage getSupportedLanguage();
+
+    /**
+     * 解析源码文件的变更行为标志
+     * @return {@link ChangeNatureFlag#toCode(EnumSet)}
+     */
+    int parseChangeNatureFlag(SourceCode sourceCodeBefore, SourceCode sourceCodeAfter);
+
+    void setConfig(C config);
 }
