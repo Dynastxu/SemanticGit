@@ -130,14 +130,20 @@ private fun WindowScope.SemanticGitApp(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(MaterialTheme.colorScheme.background)
-                    .padding(16.dp),
-                contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = allNavItems[selectedIndex].title,
-                    style = MaterialTheme.typography.headlineLarge,
-                    color = MaterialTheme.colorScheme.onBackground
-                )
+                when (selectedIndex) {
+                    0 -> RepoPage()
+                    else -> Box(
+                        modifier = Modifier.fillMaxSize().padding(16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = allNavItems[selectedIndex].title,
+                            style = MaterialTheme.typography.headlineLarge,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                    }
+                }
             }
         }
     }

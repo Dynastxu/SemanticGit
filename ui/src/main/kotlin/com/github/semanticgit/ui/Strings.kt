@@ -13,7 +13,10 @@ data class Strings(
     val titlebarToggleDark: String,
     val titlebarMinimize: String,
     val titlebarMaximize: String,
-    val titlebarClose: String
+    val titlebarClose: String,
+    val repoSelectPlaceholder: String,
+    val repoSelectFolder: String,
+    val repoNoRepoSelected: String
 )
 
 val ZhStrings = Strings(
@@ -27,7 +30,10 @@ val ZhStrings = Strings(
     titlebarToggleDark = "切换深色主题",
     titlebarMinimize = "最小化",
     titlebarMaximize = "最大化",
-    titlebarClose = "关闭"
+    titlebarClose = "关闭",
+    repoSelectPlaceholder = "选择仓库文件夹...",
+    repoSelectFolder = "选择文件夹",
+    repoNoRepoSelected = "请选择一个仓库文件夹"
 )
 
 val EnStrings = Strings(
@@ -41,7 +47,10 @@ val EnStrings = Strings(
     titlebarToggleDark = "Switch to Dark Theme",
     titlebarMinimize = "Minimize",
     titlebarMaximize = "Maximize",
-    titlebarClose = "Close"
+    titlebarClose = "Close",
+    repoSelectPlaceholder = "Select repository folder...",
+    repoSelectFolder = "Select Folder",
+    repoNoRepoSelected = "Please select a repository folder"
 )
 
 val LocalStrings = staticCompositionLocalOf { ZhStrings }
