@@ -13,12 +13,16 @@ import com.github.semanticgit.core.dao.CommitMetaDao;
 import com.github.semanticgit.core.dao.impl.ChangeLogDaoImpl;
 import com.github.semanticgit.core.dao.impl.CommitMetaDaoImpl;
 import com.github.semanticgit.core.db.DatabaseManager;
+import com.github.semanticgit.core.dto.SimpleEntityChangeStatistics;
 import com.github.semanticgit.git.dto.GitCommitInfo;
 import com.github.semanticgit.git.dto.GitDiffEntry;
 import com.github.semanticgit.git.service.GitService;
 import com.github.semanticgit.parser.java.api.ParsingResult;
 import com.github.semanticgit.parser.java.api.SourceCode;
+import jdk.jshell.spi.ExecutionControl;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
+import org.jspecify.annotations.NonNull;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -29,13 +33,18 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 @Slf4j
-public class AnalysisEngine {
+public class AnalysisEngine extends AbstractAnalysisEngine {
+    @Getter
+    private String failReason = "";
+    @Getter
+    private String failMessage = "";
 
+    @Override
     public boolean fullAnalysis(String repoPath, String databasePath) {
-        String repoName = Integer.toHexString(new File(repoPath).getAbsolutePath().hashCode());
+        String dbName = Integer.toHexString(new File(repoPath).getAbsolutePath().hashCode());
 
         try (GitService gitService = new GitService(repoPath);
-             DatabaseManager dbManager = new DatabaseManager(databasePath, repoName, true)) {
+             DatabaseManager dbManager = new DatabaseManager(databasePath, dbName, true)) {
             List<CommitMeta> commits = gitService.getAllCommits();
             log.info("Fetched {} commits from repository", commits.size());
 
@@ -84,11 +93,18 @@ public class AnalysisEngine {
             return true;
         } catch (Exception e) {
             log.error("Failed to perform full analysis", e);
+            failMessage = e.toString();
             return false;
         }
     }
 
-    private List<ChangeLog> analyzeDiff(List<GitDiffEntry> diffs, CommitMeta commit, ParserRegistry parserRegistry) {
+    @Override
+    public SimpleEntityChangeStatistics getSimpleEntityChangeStatistics(File databaseFile) {
+        // TODO: Implement this method
+        return SimpleEntityChangeStatistics.fail();
+    }
+
+    private @NonNull List<ChangeLog> analyzeDiff(@NonNull List<GitDiffEntry> diffs, CommitMeta commit, ParserRegistry parserRegistry) {
         List<ChangeLog> changeLogs = new ArrayList<>();
 
         for (GitDiffEntry diff : diffs) {
@@ -169,14 +185,14 @@ public class AnalysisEngine {
         return parserRegistry.parse(sourceCode);
     }
 
-    private Set<String> entityNameSet(ParsingResult result) {
+    private Set<String> entityNameSet(@NonNull ParsingResult result) {
         return result.getEntities().stream()
                 .map(Entity::getName)
                 .collect(Collectors.toSet());
     }
 
     private ChangeLog buildChangeLog(CommitMeta commit, Entity entity, String filePath,
-                                      ChangeOperation operation, ParsingResult result) {
+                                     ChangeOperation operation, @NonNull ParsingResult result) {
         return ChangeLog.builder()
                 .commit(commit)
                 .entity(entity)

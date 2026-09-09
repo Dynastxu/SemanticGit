@@ -15,22 +15,29 @@ public class DatabaseManager implements AutoCloseable {
 
     /**
      * @param databasePath 数据库文件存放目录
-     * @param repoName     仓库名，用作 db 文件名（如 "myproject" -> "myproject.db"）
+     * @param databaseName     仓库名，用作 db 文件名（如 "myproject" -> "myproject.db"）
      * @param overwrite    是否覆盖已存在的数据库文件
      */
-    public DatabaseManager(String databasePath, String repoName, boolean overwrite) {
+    public DatabaseManager(String databasePath, String databaseName, boolean overwrite) {
+        this(prepareDatabaseFile(databasePath, databaseName), overwrite);
+    }
+
+    private static File prepareDatabaseFile(String databasePath, String databaseName) {
         File dir = new File(databasePath);
         if (!dir.exists()) {
             dir.mkdirs();
         }
+        return new File(dir, databaseName + ".db");
+    }
 
-        File dbFile = new File(dir, repoName + ".db");
-        if (overwrite && dbFile.exists()) {
-            boolean deleted = dbFile.delete();
-            log.info("Existing database {}: {}", deleted ? "deleted" : "failed to delete", dbFile.getAbsolutePath());
+    public DatabaseManager(File databaseFile, boolean overwrite) {
+
+        if (overwrite && databaseFile.exists()) {
+            boolean deleted = databaseFile.delete();
+            log.info("Existing database {}: {}", deleted ? "deleted" : "failed to delete", databaseFile.getAbsolutePath());
         }
 
-        this.dbUrl = "jdbc:sqlite:" + dbFile.getAbsolutePath().replace("\\", "/");
+        this.dbUrl = "jdbc:sqlite:" + databaseFile.getAbsolutePath().replace("\\", "/");
         log.info("Database path: {}", dbUrl);
     }
 
