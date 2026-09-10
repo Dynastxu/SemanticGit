@@ -1,4 +1,4 @@
-package com.github.semanticgit.ui
+package com.github.semanticgit.ui.page
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -30,6 +30,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.github.semanticgit.ui.LocalStrings
 import java.io.File
 import javax.swing.JFileChooser
 
