@@ -1,6 +1,5 @@
 package com.github.semanticgit.parser.java.api;
 
-import com.github.semanticgit.common.entity.ChangeLog;
 import com.github.semanticgit.common.entity.DataQuality;
 import com.github.semanticgit.common.entity.Entity;
 import lombok.Builder;

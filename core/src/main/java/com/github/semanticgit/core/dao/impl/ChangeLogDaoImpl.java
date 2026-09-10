@@ -172,7 +172,7 @@ public class ChangeLogDaoImpl implements ChangeLogDao {
             ps.setLong(2, entityId);
             ps.setString(3, changeLog.getFilePath());
             ps.setInt(4, changeLog.getOperation().code);
-            ps.setInt(5, changeLog.getNatureFlag() != null ? changeLog.getNatureFlag().code : 0);
+            ps.setInt(5, changeLog.getNatureFlagCode());
             if (parentEntityId != null) {
                 ps.setLong(6, parentEntityId);
             } else {

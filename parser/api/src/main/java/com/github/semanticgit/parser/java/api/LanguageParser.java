@@ -17,10 +17,15 @@ public interface LanguageParser<C extends ParserConfig> {
     EntityLanguage getSupportedLanguage();
 
     /**
-     * 解析源码文件的变更行为标志
-     * @return {@link ChangeNatureFlag#toCode(EnumSet)}
+     * 解析指定实体的变更行为标志位掩码，支持多标志组合（如 REFACTOR | DOCS）。
+     * 每个 changelog 对应一个实体（类/方法），应独立调用此方法获取其专属的 flag 组合。
+     *
+     * @param sourceCodeBefore 变更前文件
+     * @param sourceCodeAfter  变更后文件
+     * @param entityName       实体全限定名，用于定位具体类/方法分析其变更性质
+     * @return {@link ChangeNatureFlag#toCode(EnumSet)} 位掩码
      */
-    int parseChangeNatureFlag(SourceCode sourceCodeBefore, SourceCode sourceCodeAfter);
+    int parseChangeNatureFlag(SourceCode sourceCodeBefore, SourceCode sourceCodeAfter, String entityName);
 
     void setConfig(C config);
 }

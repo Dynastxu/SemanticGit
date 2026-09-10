@@ -15,7 +15,13 @@ public class ChangeLog {
     private Entity entity;
     private String filePath;
     private ChangeOperation operation;
-    private ChangeNatureFlag natureFlag;
+    /**
+     * 变更性质标志位掩码，支持多标志组合（如 REFACTOR | DOCS）
+     *
+     * @see ChangeNatureFlag#toCode(java.util.EnumSet)
+     * @see ChangeNatureFlag#fromCode(int)
+     */
+    private int natureFlagCode;
     /**
      * 重构时指向旧实体
      */
