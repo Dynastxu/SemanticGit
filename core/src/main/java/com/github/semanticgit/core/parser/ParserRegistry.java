@@ -1,7 +1,7 @@
 package com.github.semanticgit.core.parser;
 
 import com.github.semanticgit.common.entity.EntityLanguage;
-import com.github.semanticgit.parser.java.JavaLanguageParser;
+import com.github.semanticgit.parser.java.JavaParser;
 import com.github.semanticgit.parser.java.JavaParserConfig;
 import com.github.semanticgit.parser.java.api.LanguageParser;
 import com.github.semanticgit.parser.java.api.ParserConfig;
@@ -16,7 +16,7 @@ public class ParserRegistry {
     private static final Map<EntityLanguage, Supplier<? extends ParserConfig>> configs = new EnumMap<>(EntityLanguage.class);
 
     static {
-        registerParser(EntityLanguage.JAVA, JavaLanguageParser::new, () -> JavaParserConfig.builder().build());
+        registerParser(EntityLanguage.JAVA, JavaParser::new, () -> JavaParserConfig.builder().build());
     }
 
     public static void registerParser(EntityLanguage language, Supplier<LanguageParser<? extends ParserConfig>> parser, Supplier<? extends ParserConfig> defaultConfig) {

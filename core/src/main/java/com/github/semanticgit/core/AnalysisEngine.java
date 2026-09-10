@@ -2,7 +2,6 @@ package com.github.semanticgit.core;
 
 import com.github.semanticgit.common.entity.AnalysisType;
 import com.github.semanticgit.common.entity.ChangeLog;
-import com.github.semanticgit.common.entity.ChangeNatureFlag;
 import com.github.semanticgit.common.entity.ChangeOperation;
 import com.github.semanticgit.common.entity.CommitMeta;
 import com.github.semanticgit.common.entity.Entity;
@@ -26,7 +25,6 @@ import org.jspecify.annotations.NonNull;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -115,12 +113,13 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
 
                     for (Entity entity : result.getEntities()) {
                         entity.setLanguage(language);
+                        int entityFlagCode = parser.parseChangeNatureFlag(null, newCode, entity.getName());
                         changeLogs.add(ChangeLog.builder()
                                 .commit(commit)
                                 .entity(entity)
                                 .filePath(filePath)
                                 .operation(ChangeOperation.ADD)
-                                .natureFlag(ChangeNatureFlag.FEAT)
+                                .natureFlagCode(entityFlagCode)
                                 .dataQuality(result.getQuality())
                                 .analysisType(AnalysisType.INCREMENTAL)
                                 .build());
@@ -133,12 +132,13 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
 
                     for (Entity entity : result.getEntities()) {
                         entity.setLanguage(language);
+                        int entityFlagCode = parser.parseChangeNatureFlag(oldCode, null, entity.getName());
                         changeLogs.add(ChangeLog.builder()
                                 .commit(commit)
                                 .entity(entity)
                                 .filePath(filePath)
                                 .operation(ChangeOperation.REMOVE)
-                                .natureFlag(ChangeNatureFlag.FEAT)
+                                .natureFlagCode(entityFlagCode)
                                 .dataQuality(result.getQuality())
                                 .analysisType(AnalysisType.INCREMENTAL)
                                 .build());
@@ -152,9 +152,6 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
                     ParsingResult oldResult = parser.parseEntities(oldCode);
                     ParsingResult newResult = parser.parseEntities(newCode);
 
-                    int natureFlagCode = parser.parseChangeNatureFlag(oldCode, newCode);
-                    ChangeNatureFlag natureFlag = extractNatureFlag(natureFlagCode);
-
                     Map<String, Entity> oldEntityMap = oldResult.getEntities().stream()
                             .collect(Collectors.toMap(Entity::getName, e -> e, (a, _) -> a));
                     Map<String, Entity> newEntityMap = newResult.getEntities().stream()
@@ -163,6 +160,7 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
                     for (Map.Entry<String, Entity> entry : newEntityMap.entrySet()) {
                         Entity entity = entry.getValue();
                         entity.setLanguage(language);
+                        int entityFlagCode = parser.parseChangeNatureFlag(oldCode, newCode, entity.getName());
 
                         if (oldEntityMap.containsKey(entry.getKey())) {
                             changeLogs.add(ChangeLog.builder()
@@ -170,7 +168,7 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
                                     .entity(entity)
                                     .filePath(filePath)
                                     .operation(ChangeOperation.MODIFY)
-                                    .natureFlag(natureFlag)
+                                    .natureFlagCode(entityFlagCode)
                                     .dataQuality(newResult.getQuality())
                                     .analysisType(AnalysisType.INCREMENTAL)
                                     .build());
@@ -180,7 +178,7 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
                                     .entity(entity)
                                     .filePath(filePath)
                                     .operation(ChangeOperation.ADD)
-                                    .natureFlag(natureFlag)
+                                    .natureFlagCode(entityFlagCode)
                                     .dataQuality(newResult.getQuality())
                                     .analysisType(AnalysisType.INCREMENTAL)
                                     .build());
@@ -191,12 +189,13 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
                         if (!newEntityMap.containsKey(entry.getKey())) {
                             Entity entity = entry.getValue();
                             entity.setLanguage(language);
+                            int entityFlagCode = parser.parseChangeNatureFlag(oldCode, newCode, entity.getName());
                             changeLogs.add(ChangeLog.builder()
                                     .commit(commit)
                                     .entity(entity)
                                     .filePath(filePath)
                                     .operation(ChangeOperation.REMOVE)
-                                    .natureFlag(natureFlag)
+                                    .natureFlagCode(entityFlagCode)
                                     .dataQuality(oldResult.getQuality())
                                     .analysisType(AnalysisType.INCREMENTAL)
                                     .build());
@@ -216,10 +215,5 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
                 .language(language)
                 .sizeInBytes(content != null ? content.length() : 0)
                 .build();
-    }
-
-    private ChangeNatureFlag extractNatureFlag(int code) {
-        EnumSet<ChangeNatureFlag> flags = ChangeNatureFlag.fromCode(code);
-        return flags.isEmpty() ? ChangeNatureFlag.FEAT : flags.iterator().next();
     }
 }

@@ -4,25 +4,28 @@ import com.github.semanticgit.parser.java.api.ParsingResult;
 import com.github.semanticgit.parser.java.api.SourceCode;
 import com.github.javaparser.ParseResult;
 import com.github.javaparser.ast.CompilationUnit;
+import com.github.semanticgit.common.entity.ChangeNatureFlag;
 import com.github.semanticgit.common.entity.DataQuality;
 import com.github.semanticgit.common.entity.Entity;
 import com.github.semanticgit.common.entity.EntityKind;
 import com.github.semanticgit.common.entity.EntityLanguage;
+
+import java.util.EnumSet;
 import org.junit.jupiter.api.*;
 
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-class JavaLanguageParserTest {
+class JavaParserTest {
 
-    private JavaLanguageParser parser;
-    private JavaLanguageParser timeoutParser;
+    private JavaParser parser;
+    private JavaParser timeoutParser;
 
     @BeforeEach
     void setUp() {
-        parser = new JavaLanguageParser(JavaParserConfig.builder().build());
-        timeoutParser = new JavaLanguageParser(JavaParserConfig.builder().timeoutMs(0).build());
+        parser = new JavaParser(JavaParserConfig.builder().build());
+        timeoutParser = new JavaParser(JavaParserConfig.builder().timeoutMs(0).build());
     }
 
     @AfterEach
@@ -468,7 +471,7 @@ class JavaLanguageParserTest {
     @Test
     @DisplayName("AST 解析 OOM 但正则回退成功应返回 REGEX 级别")
     void testParseOOMWithRegexFallbackSuccess() {
-        JavaLanguageParser oomParser = new JavaLanguageParser(JavaParserConfig.builder().build()) {
+        JavaParser oomParser = new JavaParser(JavaParserConfig.builder().build()) {
             @Override
             protected ParseResult<CompilationUnit> parseWithAST(String content) {
                 throw new OutOfMemoryError("Simulated Java heap space");
@@ -496,5 +499,81 @@ class JavaLanguageParserTest {
         assertNotNull(result);
         Assertions.assertEquals(DataQuality.FILE, result.getQuality());
         Assertions.assertTrue(result.getQualityRemark().contains("OUT_OF_MEMORY"));
+    }
+
+    @Test
+    @DisplayName("parseChangeNatureFlag 测试文件应返回 TEST 标志")
+    void testParseChangeNatureFlagTestFile() {
+        SourceCode code = SourceCode.builder()
+                .filePath("src/test/java/com/example/MyTest.java")
+                .content("public class MyTest {}")
+                .language(EntityLanguage.JAVA)
+                .build();
+
+        int flags = parser.parseChangeNatureFlag(code, code, null);
+
+        EnumSet<ChangeNatureFlag> result = ChangeNatureFlag.fromCode(flags);
+        assertTrue(result.contains(ChangeNatureFlag.TEST));
+    }
+
+    @Test
+    @DisplayName("parseChangeNatureFlag 仅空白变更应返回 STYLE 标志")
+    void testParseChangeNatureFlagStyleOnly() {
+        SourceCode before = SourceCode.builder()
+                .filePath("src/main/java/com/example/Foo.java")
+                .content("public class Foo {\n    public void bar() {}\n}")
+                .language(EntityLanguage.JAVA)
+                .build();
+        SourceCode after = SourceCode.builder()
+                .filePath("src/main/java/com/example/Foo.java")
+                .content("public class Foo {\n\n    public void bar() {}\n\n}")
+                .language(EntityLanguage.JAVA)
+                .build();
+
+        int flags = parser.parseChangeNatureFlag(before, after, null);
+
+        EnumSet<ChangeNatureFlag> result = ChangeNatureFlag.fromCode(flags);
+        assertTrue(result.contains(ChangeNatureFlag.STYLE));
+    }
+
+    @Test
+    @DisplayName("parseChangeNatureFlag 仅注释变更应返回 DOCS 标志")
+    void testParseChangeNatureFlagDocsOnly() {
+        SourceCode before = SourceCode.builder()
+                .filePath("src/main/java/com/example/Foo.java")
+                .content("public class Foo {\n    // old comment\n    public void bar() {}\n}")
+                .language(EntityLanguage.JAVA)
+                .build();
+        SourceCode after = SourceCode.builder()
+                .filePath("src/main/java/com/example/Foo.java")
+                .content("public class Foo {\n    // new comment\n    public void bar() {}\n}")
+                .language(EntityLanguage.JAVA)
+                .build();
+
+        int flags = parser.parseChangeNatureFlag(before, after, null);
+
+        EnumSet<ChangeNatureFlag> result = ChangeNatureFlag.fromCode(flags);
+        assertTrue(result.contains(ChangeNatureFlag.DOCS));
+    }
+
+    @Test
+    @DisplayName("parseChangeNatureFlag 无特殊标志应默认返回 FEAT")
+    void testParseChangeNatureFlagDefaultFeat() {
+        SourceCode before = SourceCode.builder()
+                .filePath("src/main/java/com/example/Foo.java")
+                .content("public class Foo {\n    public void bar() {}\n}")
+                .language(EntityLanguage.JAVA)
+                .build();
+        SourceCode after = SourceCode.builder()
+                .filePath("src/main/java/com/example/Foo.java")
+                .content("public class Foo {\n    public void bar() { System.out.println(\"hi\"); }\n}")
+                .language(EntityLanguage.JAVA)
+                .build();
+
+        int flags = parser.parseChangeNatureFlag(before, after, null);
+
+        EnumSet<ChangeNatureFlag> result = ChangeNatureFlag.fromCode(flags);
+        assertEquals(1, result.size());
+        assertTrue(result.contains(ChangeNatureFlag.FEAT));
     }
 }

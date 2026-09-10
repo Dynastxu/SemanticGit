@@ -82,7 +82,7 @@ class ChangeLogDaoImplTest {
                         .build())
                 .filePath("src/main/java/com/example/Test.java")
                 .operation(ChangeOperation.ADD)
-                .natureFlag(ChangeNatureFlag.FEAT)
+                .natureFlagCode(ChangeNatureFlag.FEAT.code)
                 .dataQuality(DataQuality.AST)
                 .analysisType(AnalysisType.INCREMENTAL)
                 .build();
@@ -134,7 +134,7 @@ class ChangeLogDaoImplTest {
                 .entity(entity)
                 .filePath("Test.java")
                 .operation(ChangeOperation.ADD)
-                .natureFlag(ChangeNatureFlag.FEAT)
+                .natureFlagCode(ChangeNatureFlag.FEAT.code)
                 .dataQuality(DataQuality.AST)
                 .analysisType(AnalysisType.INCREMENTAL)
                 .build();
@@ -144,7 +144,7 @@ class ChangeLogDaoImplTest {
                 .entity(entity)
                 .filePath("Test.java")
                 .operation(ChangeOperation.MODIFY)
-                .natureFlag(ChangeNatureFlag.FEAT)
+                .natureFlagCode(ChangeNatureFlag.FEAT.code)
                 .dataQuality(DataQuality.AST)
                 .analysisType(AnalysisType.INCREMENTAL)
                 .build();
@@ -182,7 +182,7 @@ class ChangeLogDaoImplTest {
                             .build())
                     .filePath("File" + i + ".java")
                     .operation(ChangeOperation.ADD)
-                    .natureFlag(ChangeNatureFlag.FEAT)
+                    .natureFlagCode(ChangeNatureFlag.FEAT.code)
                     .dataQuality(DataQuality.AST)
                     .analysisType(AnalysisType.INCREMENTAL)
                     .build());
@@ -230,7 +230,7 @@ class ChangeLogDaoImplTest {
                         .build())
                 .filePath("Test.java")
                 .operation(ChangeOperation.MODIFY)
-                .natureFlag(ChangeNatureFlag.REFACTOR)
+                .natureFlagCode(ChangeNatureFlag.REFACTOR.code)
                 .parentEntity(parentEntity)
                 .dataQuality(DataQuality.AST)
                 .analysisType(AnalysisType.INCREMENTAL)
@@ -274,7 +274,7 @@ class ChangeLogDaoImplTest {
                         .build())
                 .filePath("Test.java")
                 .operation(ChangeOperation.ADD)
-                .natureFlag(ChangeNatureFlag.FEAT)
+                .natureFlagCode(ChangeNatureFlag.FEAT.code)
                 .dataQuality(DataQuality.FILE)
                 .analysisType(AnalysisType.INCREMENTAL)
                 .build();
@@ -296,7 +296,7 @@ class ChangeLogDaoImplTest {
                             .build())
                     .filePath("Test.java")
                     .operation(op)
-                    .natureFlag(ChangeNatureFlag.FEAT)
+                    .natureFlagCode(ChangeNatureFlag.FEAT.code)
                     .dataQuality(DataQuality.AST)
                     .analysisType(AnalysisType.INCREMENTAL)
                     .build();

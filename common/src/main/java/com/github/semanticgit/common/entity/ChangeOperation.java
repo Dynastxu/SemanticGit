@@ -20,4 +20,9 @@ public enum ChangeOperation {
         for (ChangeOperation op : values()) if (op.code == code) return op;
         throw new IllegalArgumentException("Invalid operation code: " + code);
     }
+
+    public static boolean hasCode(int code) {
+        for (ChangeOperation op : ChangeOperation.values()) if (op.code == code) return true;
+        return false;
+    }
 }

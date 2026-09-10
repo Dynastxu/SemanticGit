@@ -21,7 +21,7 @@ import java.util.concurrent.*;
 
 @Slf4j
 @NoArgsConstructor
-public class JavaLanguageParser extends AbstractParser<JavaParserConfig> {
+public class JavaParser extends AbstractParser<JavaParserConfig> {
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private static final ParsingResult OOM_FALLBACK = ParsingResult.builder()
             .entities(Collections.emptyList())
@@ -30,7 +30,7 @@ public class JavaLanguageParser extends AbstractParser<JavaParserConfig> {
             .parseDurationMs(0)
             .build();
 
-    public JavaLanguageParser(JavaParserConfig config) {
+    public JavaParser(JavaParserConfig config) {
         super(config);
     }
 
@@ -143,19 +143,19 @@ public class JavaLanguageParser extends AbstractParser<JavaParserConfig> {
     }
 
     /**
-     * Level 1: 使用 JavaParser 进行 AST 解析
+     * 使用 {@link com.github.javaparser.JavaParser} 进行 AST 解析
      */
     protected ParseResult<CompilationUnit> parseWithAST(String content) {
         ParserConfiguration parserConfig = new ParserConfiguration();
         parserConfig.setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17); // 可配置化
         parserConfig.setStoreTokens(true); // 便于调试
 
-        JavaParser parser = new JavaParser(parserConfig);
+        com.github.javaparser.JavaParser parser = new com.github.javaparser.JavaParser(parserConfig);
         return parser.parse(ParseStart.COMPILATION_UNIT, new StringProvider(content));
     }
 
     /**
-     * Level 2: 正则表达式提取（降级方案）
+     * 正则表达式提取（降级方案）
      * 仅提取类名和方法签名，不关心方法体是否正确
      */
     private @NonNull List<Entity> extractWithRegex(String content) {
@@ -233,7 +233,7 @@ public class JavaLanguageParser extends AbstractParser<JavaParserConfig> {
     }
 
     /**
-     * Level 1: 从 AST 提取实体（完整且精确）
+     * 从 AST 提取实体
      */
     private @NonNull List<Entity> extractEntities(@NonNull CompilationUnit cu) {
         List<Entity> entities = new ArrayList<>();
@@ -292,7 +292,7 @@ public class JavaLanguageParser extends AbstractParser<JavaParserConfig> {
     }
 
     /**
-     * 构造降级结果（Level 2 或 Level 3）
+     * 构造降级结果
      */
     private ParsingResult buildFallbackResult(DataQuality quality, String remark) {
         return ParsingResult.builder()
@@ -304,37 +304,186 @@ public class JavaLanguageParser extends AbstractParser<JavaParserConfig> {
     }
 
     @Override
-    public int parseChangeNatureFlag(SourceCode sourceCodeBefore, SourceCode sourceCodeAfter) {
-        // 保守实现：优先判断容易识别的类型
+    public int parseChangeNatureFlag(SourceCode sourceCodeBefore, SourceCode sourceCodeAfter, String entityName) {
+        int flags = 0;
 
-        // 1. 判断是否为测试文件
-        if (isTestFile(sourceCodeAfter)) {
-            return ChangeNatureFlag.TEST.code;
+        // 1. 判断是否为测试文件（取前后中非 null 的一方）
+        SourceCode fileHint = sourceCodeAfter != null ? sourceCodeAfter : sourceCodeBefore;
+        if (isTestFile(fileHint)) {
+            flags |= ChangeNatureFlag.TEST.code;
         }
 
         // 2. 判断是否仅为样式变更（仅空白字符差异）
         if (isStyleOnlyChange(sourceCodeBefore, sourceCodeAfter)) {
-            return ChangeNatureFlag.STYLE.code;
+            flags |= ChangeNatureFlag.STYLE.code;
         }
 
         // 3. 判断是否仅为文档变更（仅注释差异）
         if (isDocsOnlyChange(sourceCodeBefore, sourceCodeAfter)) {
-            return ChangeNatureFlag.DOCS.code;
+            flags |= ChangeNatureFlag.DOCS.code;
         }
 
-        // TODO: 实现更精确的变更类型判断
-        // - FEAT: 检测到新增方法/类
-        // - FIX: 方法体变更但签名不变
-        // - REFACTOR: 方法签名变更但逻辑相似
-        // - PERF: 检测到性能优化模式（如循环优化）
-        // 默认返回 FEAT
-        return ChangeNatureFlag.FEAT.code;
+        // 4. 实体级别分析：根据 entityName 定位具体类/方法，判断变更性质
+        if (entityName != null && !entityName.isEmpty()) {
+            int entityFlags = analyzeEntityChange(sourceCodeBefore, sourceCodeAfter, entityName);
+            flags |= entityFlags;
+        }
+
+        // 如果没有任何标志匹配，默认返回 FEAT
+        if (flags == 0) {
+            return ChangeNatureFlag.FEAT.code;
+        }
+
+        return flags;
+    }
+
+    /**
+     * 分析指定实体的变更性质，返回实体级别的 flag 位掩码
+     */
+    private int analyzeEntityChange(SourceCode before, SourceCode after, String entityName) {
+        int flags = 0;
+
+        boolean entityExistedBefore = entityExistsInSource(before, entityName);
+        boolean entityExistsAfter = entityExistsInSource(after, entityName);
+
+        if (!entityExistedBefore && entityExistsAfter) {
+            // 新增实体 → FEAT
+            flags |= ChangeNatureFlag.FEAT.code;
+        } else if (entityExistedBefore && !entityExistsAfter) {
+            // 移除实体 → FEAT（也可能是重构的前半部分）
+            flags |= ChangeNatureFlag.FEAT.code;
+        } else if (entityExistedBefore && entityExistsAfter) {
+            // 实体在前后都存在，判断具体变更类型
+            String beforeBody = extractEntityBody(before, entityName);
+            String afterBody = extractEntityBody(after, entityName);
+
+            if (beforeBody != null && afterBody != null) {
+                // 去除空白和注释后比较
+                String beforeNormalized = normalizeForComparison(beforeBody);
+                String afterNormalized = normalizeForComparison(afterBody);
+
+                if (beforeNormalized.equals(afterNormalized)) {
+                    // 内容无实质变更，但实体在前后版本都存在
+                    // 可能是仅格式/注释变更，已在上面处理
+                } else {
+                    // 实体有实质变更
+                    String entitySimpleName = extractSimpleName(entityName);
+
+                    if (entitySimpleName != null && !entitySimpleName.equals(extractSimpleName(entityName))) {
+                        // 方法签名变更 → REFACTOR
+                        flags |= ChangeNatureFlag.REFACTOR.code;
+                    } else {
+                        // 方法体变更但签名不变 → 可能是 FIX 或 FEAT
+                        // 保守判断：如果方法体变小，可能是 FIX；变大，可能是 FEAT
+                        if (afterBody.length() < beforeBody.length() * 0.8) {
+                            flags |= ChangeNatureFlag.FIX.code;
+                        } else {
+                            flags |= ChangeNatureFlag.FEAT.code;
+                        }
+                    }
+                }
+            } else {
+                // 无法提取实体体，保守返回 FEAT
+                flags |= ChangeNatureFlag.FEAT.code;
+            }
+        }
+
+        return flags;
+    }
+
+    /**
+     * 判断实体是否存在于源码中
+     */
+    private boolean entityExistsInSource(SourceCode sourceCode, String entityName) {
+        if (sourceCode == null || sourceCode.getContent() == null || entityName == null) {
+            return false;
+        }
+        // 实体名格式：com.example.Class 或 com.example.Class#method
+        String simpleName = extractSimpleName(entityName);
+        return simpleName != null && sourceCode.getContent().contains(simpleName);
+    }
+
+    /**
+     * 从全限定名中提取简名
+     */
+    private String extractSimpleName(String fullyQualifiedName) {
+        if (fullyQualifiedName == null) {
+            return null;
+        }
+        // 处理方法：com.example.Class#method → method
+        int hashIdx = fullyQualifiedName.indexOf('#');
+        if (hashIdx >= 0) {
+            return fullyQualifiedName.substring(hashIdx + 1);
+        }
+        // 处理类：com.example.Class → Class
+        int dotIdx = fullyQualifiedName.lastIndexOf('.');
+        if (dotIdx >= 0) {
+            return fullyQualifiedName.substring(dotIdx + 1);
+        }
+        return fullyQualifiedName;
+    }
+
+    /**
+     * 从源码中提取指定实体的方法体/类体
+     */
+    private String extractEntityBody(SourceCode sourceCode, String entityName) {
+        if (sourceCode == null || sourceCode.getContent() == null) {
+            return null;
+        }
+        String content = sourceCode.getContent();
+        String simpleName = extractSimpleName(entityName);
+        if (simpleName == null) {
+            return null;
+        }
+
+        // 尝试用 AST 解析并提取实体体
+        try {
+            if (sourceCode.getSizeInBytes() <= config.getMaxParseSizeBytes()) {
+                ParseResult<CompilationUnit> parseResult = parseWithAST(content);
+                if (parseResult.isSuccessful() && parseResult.getResult().isPresent()) {
+                    CompilationUnit cu = parseResult.getResult().get();
+                    // 查找方法
+                    for (MethodDeclaration method : cu.findAll(MethodDeclaration.class)) {
+                        if (method.getNameAsString().equals(simpleName)) {
+                            return method.getBody()
+                                    .map(body -> body.toString())
+                                    .orElse(method.toString());
+                        }
+                    }
+                    // 查找类
+                    for (ClassOrInterfaceDeclaration cls : cu.findAll(ClassOrInterfaceDeclaration.class)) {
+                        if (cls.getNameAsString().equals(simpleName)) {
+                            return cls.toString();
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.debug("AST extraction failed for entity {}: {}", entityName, e.getMessage());
+        }
+
+        return null;
+    }
+
+    /**
+     * 规范化代码用于比较：去除空白和注释
+     */
+    private String normalizeForComparison(String code) {
+        if (code == null) {
+            return "";
+        }
+        return code.replaceAll("//.*", "")
+                .replaceAll("/\\*.*?\\*/", "")
+                .replaceAll("\\s+", "");
     }
 
     /**
      * 判断是否为测试文件
      */
     private boolean isTestFile(SourceCode sourceCode) {
+        if (sourceCode == null) {
+            return false;
+        }
         String filePath = sourceCode.getFilePath();
         return filePath != null && (
             filePath.contains("/test/") ||
