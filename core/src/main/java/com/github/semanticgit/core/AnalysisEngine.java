@@ -94,6 +94,13 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
         }
     }
 
+    @Override
+    public boolean isDatabaseExists(String repoPath, String databaseDir) {
+        String dbName = Integer.toHexString(new File(repoPath).getAbsolutePath().hashCode());
+        File dbFile = new File(databaseDir, dbName + ".db");
+        return dbFile.exists();
+    }
+
     private @NonNull List<ChangeLog> analyzeDiff(@NonNull List<GitDiffEntry> diffs, CommitMeta commit) {
         List<ChangeLog> changeLogs = new ArrayList<>();
 

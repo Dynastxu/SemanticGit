@@ -9,8 +9,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
@@ -18,10 +22,12 @@ import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -30,7 +36,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.github.semanticgit.common.entity.ChangeNatureFlag
+import com.github.semanticgit.common.entity.ChangeOperation
+import com.github.semanticgit.core.AnalysisEngine
+import com.github.semanticgit.core.StatisticsProvider
+import com.github.semanticgit.core.db.DatabaseManager
+import com.github.semanticgit.core.dto.SimpleEntityChangeStatistics
 import com.github.semanticgit.ui.LocalStrings
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import javax.swing.JFileChooser
 
@@ -44,6 +58,47 @@ fun RepoPage(modifier: Modifier = Modifier) {
 
     val displayNames = remember(repoPaths.toList()) {
         computeDisplayNames(repoPaths.toList())
+    }
+
+    var isLoading by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var statistics by remember { mutableStateOf<SimpleEntityChangeStatistics?>(null) }
+
+    val selectedPath = repoPaths.getOrNull(selectedIndex)
+
+    LaunchedEffect(selectedPath) {
+        if (selectedPath == null) {
+            statistics = null
+            errorMessage = null
+            return@LaunchedEffect
+        }
+        isLoading = true
+        errorMessage = null
+        statistics = null
+
+        withContext(Dispatchers.IO) {
+            val dbDir = "${System.getProperty("user.home")}/.semanticgit/db"
+            val engine = AnalysisEngine()
+
+            if (!engine.isDatabaseExists(selectedPath, dbDir)) {
+                val success = engine.fullAnalysis(selectedPath, dbDir)
+                if (!success) {
+                    errorMessage = engine.failMessage.ifBlank { strings.repoAnalysisFailed }
+                    return@withContext
+                }
+            }
+
+            val dbName = Integer.toHexString(File(selectedPath).absolutePath.hashCode())
+            DatabaseManager(dbDir, dbName, false).use { dbManager ->
+                val provider = StatisticsProvider(dbManager)
+                statistics = provider.simpleEntityChangeStatistics
+                if (!statistics!!.isSuccess) {
+                    errorMessage = strings.repoAnalysisFailed
+                }
+            }
+        }
+
+        isLoading = false
     }
 
     Column(
@@ -113,13 +168,7 @@ fun RepoPage(modifier: Modifier = Modifier) {
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        if (selectedIndex in repoPaths.indices) {
-            Text(
-                text = repoPaths[selectedIndex],
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-        } else {
+        if (selectedPath == null) {
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
@@ -130,7 +179,117 @@ fun RepoPage(modifier: Modifier = Modifier) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+        } else if (isLoading) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator()
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = strings.repoAnalyzing,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        } else if (errorMessage != null) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = errorMessage!!,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+        } else {
+            StatisticsContent(strings = strings, statistics = statistics)
         }
+    }
+}
+
+@Composable
+private fun StatisticsContent(
+    strings: com.github.semanticgit.ui.Strings,
+    statistics: SimpleEntityChangeStatistics?
+) {
+    if (statistics == null) return
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+    ) {
+        Text(
+            text = "${strings.repoAnalysisStatus}: ${if (statistics.isSuccess) "OK" else "FAILED"}",
+            style = MaterialTheme.typography.titleMedium,
+            color = if (statistics.isSuccess) MaterialTheme.colorScheme.onSurface
+                    else MaterialTheme.colorScheme.error
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = "${strings.repoTotalCommits}: ${statistics.totalCommits}",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = strings.repoOperationDistribution,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        val operationMap = statistics.operationFloatMap ?: emptyMap()
+        ChangeOperation.entries.forEach { op ->
+            StatRow(label = op.desc, ratio = operationMap[op] ?: 0f)
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = strings.repoNatureDistribution,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        val natureMap = statistics.natureFlagFloatMap ?: emptyMap()
+        ChangeNatureFlag.entries.forEach { flag ->
+            StatRow(label = flag.name.lowercase(), ratio = natureMap[flag] ?: 0f)
+        }
+    }
+}
+
+@Composable
+private fun StatRow(label: String, ratio: Float) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.width(80.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        LinearProgressIndicator(
+            progress = { ratio },
+            modifier = Modifier.weight(1f).height(12.dp)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = "${(ratio * 100).toInt()}%",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 

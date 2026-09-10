@@ -19,15 +19,12 @@ public class DatabaseManager implements AutoCloseable {
      * @param overwrite    是否覆盖已存在的数据库文件
      */
     public DatabaseManager(String databasePath, String databaseName, boolean overwrite) {
-        this(prepareDatabaseFile(databasePath, databaseName), overwrite);
-    }
-
-    private static File prepareDatabaseFile(String databasePath, String databaseName) {
         File dir = new File(databasePath);
         if (!dir.exists()) {
             dir.mkdirs();
         }
-        return new File(dir, databaseName + ".db");
+        File databaseFile = new File(dir, databaseName + ".db");
+        this(databaseFile, overwrite);
     }
 
     public DatabaseManager(File databaseFile, boolean overwrite) {
@@ -39,6 +36,10 @@ public class DatabaseManager implements AutoCloseable {
 
         this.dbUrl = "jdbc:sqlite:" + databaseFile.getAbsolutePath().replace("\\", "/");
         log.info("Database path: {}", dbUrl);
+    }
+
+    public DatabaseManager(File databaseFile) {
+        this(databaseFile, false);
     }
 
     public Connection getConnection() throws SQLException {

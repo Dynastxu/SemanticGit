@@ -16,7 +16,13 @@ data class Strings(
     val titlebarClose: String,
     val repoSelectPlaceholder: String,
     val repoSelectFolder: String,
-    val repoNoRepoSelected: String
+    val repoNoRepoSelected: String,
+    val repoAnalyzing: String,
+    val repoAnalysisFailed: String,
+    val repoOperationDistribution: String,
+    val repoNatureDistribution: String,
+    val repoTotalCommits: String,
+    val repoAnalysisStatus: String
 )
 
 val ZhStrings = Strings(
@@ -33,7 +39,13 @@ val ZhStrings = Strings(
     titlebarClose = "关闭",
     repoSelectPlaceholder = "选择仓库文件夹...",
     repoSelectFolder = "选择文件夹",
-    repoNoRepoSelected = "请选择一个仓库文件夹"
+    repoNoRepoSelected = "请选择一个仓库文件夹",
+    repoAnalyzing = "正在分析仓库...",
+    repoAnalysisFailed = "分析失败",
+    repoOperationDistribution = "操作类型分布",
+    repoNatureDistribution = "变更性质分布",
+    repoTotalCommits = "总提交数",
+    repoAnalysisStatus = "分析状态"
 )
 
 val EnStrings = Strings(
@@ -50,7 +62,13 @@ val EnStrings = Strings(
     titlebarClose = "Close",
     repoSelectPlaceholder = "Select repository folder...",
     repoSelectFolder = "Select Folder",
-    repoNoRepoSelected = "Please select a repository folder"
+    repoNoRepoSelected = "Please select a repository folder",
+    repoAnalyzing = "Analyzing repository...",
+    repoAnalysisFailed = "Analysis failed",
+    repoOperationDistribution = "Operation Distribution",
+    repoNatureDistribution = "Change Nature Distribution",
+    repoTotalCommits = "Total Commits",
+    repoAnalysisStatus = "Analysis Status"
 )
 
 val LocalStrings = staticCompositionLocalOf { ZhStrings }

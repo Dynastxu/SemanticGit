@@ -10,5 +10,5 @@ import java.util.List;
 public interface ChangeLogDao {
     void save(ChangeLog changeLog);
     void saveAll(List<ChangeLog> changeLogs);
-    ResultSet querySimpleEntityChangeStatistics(Connection conn) throws SQLException;
+    ResultSet querySimpleEntityChangeStatistics() throws SQLException;
 }

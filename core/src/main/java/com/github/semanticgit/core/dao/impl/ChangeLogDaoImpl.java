@@ -74,9 +74,9 @@ public class ChangeLogDaoImpl implements ChangeLogDao {
     }
 
     @Override
-    public ResultSet querySimpleEntityChangeStatistics(Connection conn) throws SQLException {
-        try (Statement stmt = conn.createStatement();
-             ResultSet rs = stmt.executeQuery("""
+    public ResultSet querySimpleEntityChangeStatistics() throws SQLException {
+        Statement stmt = dbManager.getConnection().createStatement();
+        return stmt.executeQuery("""
                      WITH commit_counts AS (
                          SELECT
                              commit_id,
@@ -124,9 +124,7 @@ public class ChangeLogDaoImpl implements ChangeLogDao {
                      LEFT JOIN op_stats op ON op.value = av.value
                      LEFT JOIN nf_stats nf ON nf.value = av.value
                      ORDER BY av.value;
-                     """)) {
-            return rs;
-        }
+                     """);
     }
 
     private @NonNull Long resolveCommitId(Connection conn, String hash) throws SQLException {
