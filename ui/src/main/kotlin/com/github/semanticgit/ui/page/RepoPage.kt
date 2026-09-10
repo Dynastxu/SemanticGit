@@ -5,11 +5,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -22,7 +22,6 @@ import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -43,6 +42,7 @@ import com.github.semanticgit.core.StatisticsProvider
 import com.github.semanticgit.core.db.DatabaseManager
 import com.github.semanticgit.core.dto.SimpleEntityChangeStatistics
 import com.github.semanticgit.ui.LocalStrings
+import com.github.semanticgit.ui.chart.EChartsView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -238,59 +238,71 @@ private fun StatisticsContent(
             color = MaterialTheme.colorScheme.onSurface
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Text(
-            text = strings.repoOperationDistribution,
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
         Spacer(modifier = Modifier.height(8.dp))
-        val operationMap = statistics.operationFloatMap ?: emptyMap()
-        ChangeOperation.entries.forEach { op ->
-            StatRow(label = op.desc, ratio = operationMap[op] ?: 0f)
+
+        val operationOptionJson = remember(statistics, strings) {
+            buildRoseChartOption(
+                title = strings.repoOperationDistribution,
+                dataMap = statistics.operationFloatMap ?: emptyMap(),
+                entries = ChangeOperation.entries.toList(),
+                nameExtractor = { it.desc }
+            )
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        val natureOptionJson = remember(statistics, strings) {
+            buildRoseChartOption(
+                title = strings.repoNatureDistribution,
+                dataMap = statistics.natureFlagFloatMap ?: emptyMap(),
+                entries = ChangeNatureFlag.entries.toList(),
+                nameExtractor = { it.name.lowercase() }
+            )
+        }
 
-        Text(
-            text = strings.repoNatureDistribution,
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        val natureMap = statistics.natureFlagFloatMap ?: emptyMap()
-        ChangeNatureFlag.entries.forEach { flag ->
-            StatRow(label = flag.name.lowercase(), ratio = natureMap[flag] ?: 0f)
+        Row(
+            modifier = Modifier.fillMaxWidth().height(400.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            EChartsView(
+                optionJson = operationOptionJson,
+                modifier = Modifier.weight(1f).fillMaxHeight()
+            )
+
+            EChartsView(
+                optionJson = natureOptionJson,
+                modifier = Modifier.weight(1f).fillMaxHeight()
+            )
         }
     }
 }
 
-@Composable
-private fun StatRow(label: String, ratio: Float) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = label,
-            modifier = Modifier.width(80.dp),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-        LinearProgressIndicator(
-            progress = { ratio },
-            modifier = Modifier.weight(1f).height(12.dp)
-        )
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(
-            text = "${(ratio * 100).toInt()}%",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+private fun <T> buildRoseChartOption(
+    title: String,
+    dataMap: Map<T, Float>,
+    entries: List<T>,
+    nameExtractor: (T) -> String
+): String {
+    val dataItems = entries.joinToString(",") { entry ->
+        val value = ((dataMap[entry] ?: 0f) * 100).toInt()
+        """{"value":$value,"name":"${nameExtractor(entry)}"}"""
     }
+    val legendItems = entries.joinToString(",") { """"${nameExtractor(it)}"""" }
+
+    return """
+        {
+            "title": { "text": "$title", "left": "center" },
+            "tooltip": { "trigger": "item", "formatter": "{b} : {d}%" },
+            "legend": { "left": "center", "top": "bottom", "data": [$legendItems] },
+            "series": [{
+                "type": "pie",
+                "radius": [20, 140],
+                "roseType": "radius",
+                "itemStyle": { "borderRadius": 5 },
+                "label": { "show": false },
+                "emphasis": { "label": { "show": true } },
+                "data": [$dataItems]
+            }]
+        }
+    """.trimIndent()
 }
 
 internal fun computeDisplayNames(paths: List<String>): List<String> {
