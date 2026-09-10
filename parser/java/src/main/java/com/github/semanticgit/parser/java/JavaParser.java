@@ -21,7 +21,7 @@ import java.util.concurrent.*;
 
 @Slf4j
 @NoArgsConstructor
-public class JavaLanguageParser extends AbstractParser<JavaParserConfig> {
+public class JavaParser extends AbstractParser<JavaParserConfig> {
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private static final ParsingResult OOM_FALLBACK = ParsingResult.builder()
             .entities(Collections.emptyList())
@@ -30,7 +30,7 @@ public class JavaLanguageParser extends AbstractParser<JavaParserConfig> {
             .parseDurationMs(0)
             .build();
 
-    public JavaLanguageParser(JavaParserConfig config) {
+    public JavaParser(JavaParserConfig config) {
         super(config);
     }
 
@@ -150,7 +150,7 @@ public class JavaLanguageParser extends AbstractParser<JavaParserConfig> {
         parserConfig.setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17); // 可配置化
         parserConfig.setStoreTokens(true); // 便于调试
 
-        JavaParser parser = new JavaParser(parserConfig);
+        com.github.javaparser.JavaParser parser = new com.github.javaparser.JavaParser(parserConfig);
         return parser.parse(ParseStart.COMPILATION_UNIT, new StringProvider(content));
     }
 

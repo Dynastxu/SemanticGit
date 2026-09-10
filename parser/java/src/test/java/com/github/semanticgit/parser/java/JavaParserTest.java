@@ -14,15 +14,15 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-class JavaLanguageParserTest {
+class JavaParserTest {
 
-    private JavaLanguageParser parser;
-    private JavaLanguageParser timeoutParser;
+    private JavaParser parser;
+    private JavaParser timeoutParser;
 
     @BeforeEach
     void setUp() {
-        parser = new JavaLanguageParser(JavaParserConfig.builder().build());
-        timeoutParser = new JavaLanguageParser(JavaParserConfig.builder().timeoutMs(0).build());
+        parser = new JavaParser(JavaParserConfig.builder().build());
+        timeoutParser = new JavaParser(JavaParserConfig.builder().timeoutMs(0).build());
     }
 
     @AfterEach
@@ -468,7 +468,7 @@ class JavaLanguageParserTest {
     @Test
     @DisplayName("AST 解析 OOM 但正则回退成功应返回 REGEX 级别")
     void testParseOOMWithRegexFallbackSuccess() {
-        JavaLanguageParser oomParser = new JavaLanguageParser(JavaParserConfig.builder().build()) {
+        JavaParser oomParser = new JavaParser(JavaParserConfig.builder().build()) {
             @Override
             protected ParseResult<CompilationUnit> parseWithAST(String content) {
                 throw new OutOfMemoryError("Simulated Java heap space");
