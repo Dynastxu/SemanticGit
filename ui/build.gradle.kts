@@ -35,3 +35,16 @@ dependencies {
     implementation(project(":core"))
     implementation("cafe.adriel.lyricist:lyricist:1.8.0")
 }
+
+tasks.register<JavaExec>("runEChartsDemo") {
+    group = "application"
+    description = "运行 ECharts Demo"
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("com.github.semanticgit.ui.chart.EChartsViewDemoKt")
+    jvmArgs = listOf(
+        "--enable-native-access=javafx.graphics,javafx.web,ALL-UNNAMED",
+        "--upgrade-module-path=$javafxSdkLib",
+        "--module-path=$javafxSdkLib",
+        "--add-modules=javafx.web,javafx.swing,jdk.jsobject"
+    )
+}
