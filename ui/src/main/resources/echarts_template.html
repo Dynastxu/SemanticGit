@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <script>__ECHARTS_JS__</script>
+    <style>
+        html, body, #chart {
+            margin: 0; padding: 0;
+            width: 100%; height: 100%;
+            overflow: hidden;
+            background: transparent;
+        }
+    </style>
+</head>
+<body>
+<div id="chart"></div>
+<script>
+    var myChart = null;
+
+    function initChart() {
+        if (typeof echarts === 'undefined') {
+            console.error('ECharts 未加载！');
+            return;
+        }
+        myChart = echarts.init(document.getElementById('chart'), null, { renderer: 'svg' });
+
+        myChart.on('click', function (params) {
+            if (window.javaBridge && window.javaBridge.onChartClick) {
+                var v = params.value;
+                var valueStr = (v !== null && typeof v === 'object') ? JSON.stringify(v) : String(v);
+                window.javaBridge.onChartClick(params.seriesName || '', params.name || '', valueStr);
+            }
+        });
+
+        window.addEventListener('resize', function () { if (myChart) myChart.resize(); });
+    }
+
+    function updateChart(option) {
+        if (!myChart) {
+            // 如果还没初始化，延迟重试
+            setTimeout(function () { updateChart(option); }, 50);
+            return;
+        }
+        myChart.setOption(option, true);
+    }
+
+    // 页面加载完成后立即初始化
+    window.addEventListener('load', initChart);
+</script>
+</body>
+</html>
