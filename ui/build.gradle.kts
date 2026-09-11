@@ -14,6 +14,10 @@ javafx {
     modules("javafx.web", "javafx.swing")
 }
 
+tasks.withType<Test> {
+    failOnNoDiscoveredTests = false   // 允许没有测试
+}
+
 val javafxSdkLib = "C:/Program Files/Java/javafx-sdk-25.0.4/lib"
 
 compose.desktop {
