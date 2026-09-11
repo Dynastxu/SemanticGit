@@ -108,7 +108,7 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
             String filePath = diff.getNewPath() != null ? diff.getNewPath() : diff.getOldPath();
             EntityLanguage language = ParserRegistry.detectLanguage(filePath);
 
-            if (language == null) {
+            if (language == null || !ParserRegistry.hasParser(language)) {
                 continue;
             }
 

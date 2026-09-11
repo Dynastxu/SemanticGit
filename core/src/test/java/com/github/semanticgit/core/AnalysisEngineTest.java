@@ -128,7 +128,7 @@ class AnalysisEngineTest {
             // 验证每个提交的 hash 都已保存
             for (CommitMeta expected : expectedCommits) {
                 try (ResultSet rs = stmt.executeQuery(
-                        "SELECT hash, timestamp, message FROM commit_meta WHERE hash = '" + expected.getHash() + "'")) {
+                        "SELECT hash, timestamp, message FROM commit_meta WHERE hash = X'" + expected.getHash() + "'")) {
                     assertTrue(rs.next(), "应找到提交: " + expected.getHash());
                     assertEquals(expected.getTimestamp(), rs.getInt("timestamp"), "时间戳应匹配");
                     assertEquals(expected.getMessage(), rs.getString("message"), "提交信息应匹配");

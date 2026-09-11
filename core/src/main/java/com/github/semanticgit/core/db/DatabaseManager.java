@@ -64,7 +64,7 @@ public class DatabaseManager implements AutoCloseable {
             stmt.execute("""
                         CREATE TABLE IF NOT EXISTS commit_meta (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            hash TEXT NOT NULL UNIQUE,
+                            hash BLOB NOT NULL UNIQUE,
                             author_id INTEGER NOT NULL,
                             timestamp INTEGER NOT NULL,
                             message TEXT,

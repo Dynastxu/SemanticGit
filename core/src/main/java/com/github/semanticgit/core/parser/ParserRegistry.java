@@ -30,6 +30,10 @@ public class ParserRegistry {
         return parser;
     }
 
+    public static boolean hasParser(EntityLanguage language) {
+        return parsers.containsKey(language);
+    }
+
     public static <C extends ParserConfig> @NonNull LanguageParser<C> getParser(EntityLanguage language, C config) {
         LanguageParser parser = getParser(language);
         parser.setConfig(config);

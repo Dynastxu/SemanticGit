@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.NonNull;
 
 import java.sql.*;
+import java.util.HexFormat;
 import java.util.List;
 
 @Slf4j
@@ -128,9 +129,15 @@ public class ChangeLogDaoImpl implements ChangeLogDao {
     }
 
     private @NonNull Long resolveCommitId(Connection conn, String hash) throws SQLException {
+        byte[] hashBytes;
+        try {
+            hashBytes = HexFormat.of().parseHex(hash);
+        } catch (IllegalArgumentException e) {
+            throw new SQLException("Invalid commit hash: " + hash, e);
+        }
         String sql = "SELECT id FROM commit_meta WHERE hash = ?";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, hash);
+            ps.setBytes(1, hashBytes);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
                     return rs.getLong(1);

@@ -11,6 +11,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.HexFormat;
 import java.util.List;
 
 @Slf4j
@@ -88,7 +89,7 @@ public class CommitMetaDaoImpl implements CommitMetaDao {
             VALUES (?, ?, ?, ?)
         """;
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, commit.getHash());
+            ps.setBytes(1, HexFormat.of().parseHex(commit.getHash()));
             ps.setLong(2, authorId);
             ps.setInt(3, commit.getTimestamp());
             ps.setString(4, commit.getMessage());
