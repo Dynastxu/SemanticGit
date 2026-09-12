@@ -1,19 +1,59 @@
 package com.github.semanticgit.core;
 
-public abstract class AbstractAnalysisEngine {
+import org.jspecify.annotations.Nullable;
+
+import java.io.File;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.Function;
+
+abstract class AbstractAnalysisEngine {
+    @Nullable
+    protected CompletableFuture<Void> fullAnalysisFuture;
+    @Nullable
+    protected CompletableFuture<Void> incrementalAnalysisFuture;
+
     /**
      * 全量分析
-     * @param repoPath 仓库路径
+     *
+     * @param repoPath    仓库路径
      * @param databaseDir 数据库保存的文件夹路径
      * @return 是否成功
+     * @deprecated Use {@link #fullAnalysisAsync} instead
      */
+    @Deprecated
     public abstract boolean fullAnalysis(String repoPath, String databaseDir);
 
     /**
+     * 异步全量分析
+     *
+     * @param repoPath     仓库路径
+     * @param databaseDir  数据库保存的文件夹路径
+     * @param databaseName 数据库名称
+     * @param onProgress   进度回调函数
+     * @return 异步任务完成的 CompletableFuture 对象
+     */
+    public abstract CompletableFuture<Void> fullAnalysisAsync(String repoPath, String databaseDir, String databaseName, Callable<Float> onProgress, Function<Throwable, Void> onError);
+
+    /**
+     * 增量分析
+     *
+     * @param repoPath     仓库路径
+     * @param databaseFile 数据库文件
+     * @param onProgress   进度回调函数
+     * @param onError      异常回调函数
+     * @return 异步任务完成的 CompletableFuture 对象
+     */
+    public abstract CompletableFuture<Void> incrementalAnalysisAsync(String repoPath, File databaseFile, Callable<Float> onProgress, Function<Throwable, Void> onError);
+
+    /**
      * 检查仓库对应的数据库文件是否已存在
-     * @param repoPath 仓库路径
+     *
+     * @param repoPath    仓库路径
      * @param databaseDir 数据库保存的文件夹路径
      * @return 数据库文件是否存在
+     * @deprecated 由调用方自行判断
      */
+    @Deprecated
     public abstract boolean isDatabaseExists(String repoPath, String databaseDir);
 }

@@ -27,6 +27,9 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -92,6 +95,24 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
             failMessage = e.toString();
             return false;
         }
+    }
+
+    @Override
+    public CompletableFuture<Void> fullAnalysisAsync(String repoPath, String databaseDir, String databaseName, Callable<Float> onProgress, Function<Throwable, Void> onError) {
+        if (fullAnalysisFuture != null && fullAnalysisFuture.isDone()) {
+            return fullAnalysisFuture;
+        }
+        // TODO 实现
+        return null;
+    }
+
+    @Override
+    public CompletableFuture<Void> incrementalAnalysisAsync(String repoPath, File databaseFile, Callable<Float> onProgress, Function<Throwable, Void> onError) {
+        if (incrementalAnalysisFuture != null && incrementalAnalysisFuture.isDone()) {
+            return incrementalAnalysisFuture;
+        }
+        // TODO 实现
+        return null;
     }
 
     @Override
