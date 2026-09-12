@@ -4,13 +4,11 @@ import com.github.semanticgit.parser.java.api.ParsingResult;
 import com.github.semanticgit.parser.java.api.SourceCode;
 import com.github.javaparser.ParseResult;
 import com.github.javaparser.ast.CompilationUnit;
-import com.github.semanticgit.common.entity.ChangeNatureFlag;
 import com.github.semanticgit.common.entity.DataQuality;
 import com.github.semanticgit.common.entity.Entity;
 import com.github.semanticgit.common.entity.EntityKind;
 import com.github.semanticgit.common.entity.EntityLanguage;
 
-import java.util.EnumSet;
 import org.junit.jupiter.api.*;
 
 import java.util.List;
@@ -132,8 +130,8 @@ class JavaParserTest {
                 .filter(e -> e.getKind() == EntityKind.METHOD)
                 .toList();
         assertEquals(2, methods.size());
-        assertTrue(methods.stream().anyMatch(m -> m.getName().equals("com.example.HelloWorld#sayHello")));
-        assertTrue(methods.stream().anyMatch(m -> m.getName().equals("com.example.HelloWorld#getName")));
+        assertTrue(methods.stream().anyMatch(m -> m.getName().equals("com.example.HelloWorld#sayHello()")));
+        assertTrue(methods.stream().anyMatch(m -> m.getName().equals("com.example.HelloWorld#getName()")));
     }
 
     @Test
@@ -177,7 +175,7 @@ class JavaParserTest {
                 .filter(e -> e.getKind() == EntityKind.METHOD)
                 .toList();
         assertTrue(methods.size() >= 2, "至少应有 outerMethod 和 innerMethod");
-        assertTrue(methods.stream().anyMatch(m -> m.getName().equals("com.example.Outer#outerMethod")));
+        assertTrue(methods.stream().anyMatch(m -> m.getName().equals("com.example.Outer#outerMethod()")));
     }
 
     @Test
@@ -367,7 +365,7 @@ class JavaParserTest {
         Entity methodEntity = result.getEntities().stream()
                 .filter(e -> e.getKind() == EntityKind.METHOD)
                 .findFirst().orElseThrow();
-        assertEquals("DefaultPackageClass#doSomething", methodEntity.getName());
+        assertEquals("DefaultPackageClass#doSomething()", methodEntity.getName());
     }
 
     @Test
@@ -404,8 +402,8 @@ class JavaParserTest {
                 .filter(e -> e.getKind() == EntityKind.METHOD)
                 .toList();
         assertEquals(2, methods.size());
-        assertTrue(methods.stream().anyMatch(m -> m.getName().equals("com.example.GenericBox#getValue")));
-        assertTrue(methods.stream().anyMatch(m -> m.getName().equals("com.example.GenericBox#transform")));
+        assertTrue(methods.stream().anyMatch(m -> m.getName().equals("com.example.GenericBox#getValue()")));
+        assertTrue(methods.stream().anyMatch(m -> m.getName().equals("com.example.GenericBox#transform(U)")));
     }
 
     @Test
