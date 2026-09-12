@@ -28,4 +28,6 @@ public interface LanguageParser<C extends ParserConfig> {
     int parseChangeNatureFlag(SourceCode sourceCodeBefore, SourceCode sourceCodeAfter, String entityName);
 
     void setConfig(C config);
+
+    C getConfig();
 }
