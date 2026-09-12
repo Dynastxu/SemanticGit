@@ -2,6 +2,7 @@ package com.github.semanticgit.parser.java;
 
 import com.github.semanticgit.common.entity.*;
 import com.github.semanticgit.parser.java.api.AbstractParser;
+import com.github.semanticgit.parser.java.api.EntityChange;
 import com.github.semanticgit.parser.java.api.ParsingResult;
 import com.github.semanticgit.parser.java.api.SourceCode;
 import com.github.javaparser.*;
@@ -304,37 +305,21 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
     }
 
     @Override
+    @Deprecated
     public int parseChangeNatureFlag(SourceCode sourceCodeBefore, SourceCode sourceCodeAfter, String entityName) {
-        int flags = 0;
+        return 0;
+    }
 
-        // 1. 判断是否为测试文件（取前后中非 null 的一方）
-        SourceCode fileHint = sourceCodeAfter != null ? sourceCodeAfter : sourceCodeBefore;
-        if (isTestFile(fileHint)) {
-            flags |= ChangeNatureFlag.TEST.code;
-        }
+    @Override
+    public List<EntityChange> parseChangeNatureFlags(SourceCode sourceCodeBefore, SourceCode sourceCodeAfter) {
+        // TODO
+        return List.of();
+    }
 
-        // 2. 判断是否仅为样式变更（仅空白字符差异）
-        if (isStyleOnlyChange(sourceCodeBefore, sourceCodeAfter)) {
-            flags |= ChangeNatureFlag.STYLE.code;
-        }
-
-        // 3. 判断是否仅为文档变更（仅注释差异）
-        if (isDocsOnlyChange(sourceCodeBefore, sourceCodeAfter)) {
-            flags |= ChangeNatureFlag.DOCS.code;
-        }
-
-        // 4. 实体级别分析：根据 entityName 定位具体类/方法，判断变更性质
-        if (entityName != null && !entityName.isEmpty()) {
-            int entityFlags = analyzeEntityChange(sourceCodeBefore, sourceCodeAfter, entityName);
-            flags |= entityFlags;
-        }
-
-        // 如果没有任何标志匹配，默认返回 FEAT
-        if (flags == 0) {
-            return ChangeNatureFlag.FEAT.code;
-        }
-
-        return flags;
+    @Override
+    public int parseEntityChangeNatureFlag(String sourceCodeBefore, String sourceCodeAfter) {
+        // TODO
+        return 0;
     }
 
     /**
@@ -496,7 +481,7 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
     /**
      * 判断是否仅为样式变更（去除空白后内容相同）
      */
-    private boolean isStyleOnlyChange(SourceCode before, SourceCode after) {
+    private boolean isStyleChange(SourceCode before, SourceCode after) {
         if (before == null || after == null) {
             return false;
         }
@@ -508,7 +493,7 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
     /**
      * 判断是否仅为文档变更（去除注释后内容相同）
      */
-    private boolean isDocsOnlyChange(SourceCode before, SourceCode after) {
+    private boolean isDocsChange(SourceCode before, SourceCode after) {
         if (before == null || after == null) {
             return false;
         }
