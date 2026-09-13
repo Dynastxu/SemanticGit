@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 import java.util.function.Function;
 
 abstract class AbstractAnalysisEngine {
@@ -32,7 +33,7 @@ abstract class AbstractAnalysisEngine {
      * @param onProgress   进度回调函数
      * @return 异步任务完成的 CompletableFuture 对象
      */
-    public abstract CompletableFuture<Void> fullAnalysisAsync(String repoPath, String databaseDir, String databaseName, Callable<Float> onProgress, Function<Throwable, Void> onError);
+    public abstract CompletableFuture<Void> fullAnalysisAsync(String repoPath, String databaseDir, String databaseName, Consumer<Float> onProgress, Function<Throwable, Void> onError);
 
     /**
      * 增量分析
@@ -43,7 +44,7 @@ abstract class AbstractAnalysisEngine {
      * @param onError      异常回调函数
      * @return 异步任务完成的 CompletableFuture 对象
      */
-    public abstract CompletableFuture<Void> incrementalAnalysisAsync(String repoPath, File databaseFile, Callable<Float> onProgress, Function<Throwable, Void> onError);
+    public abstract CompletableFuture<Void> incrementalAnalysisAsync(String repoPath, File databaseFile, Consumer<Float> onProgress, Function<Throwable, Void> onError);
 
     /**
      * 检查仓库对应的数据库文件是否已存在

@@ -250,9 +250,11 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
                     ? className
                     : packageName + "." + className;
 
+            String classSig = buildClassSignature(cls);
             entities.add(Entity.builder()
                     .name(fullyQualifiedName)
                     .kind(EntityKind.CLASS)
+                    .signature(classSig)
                     .build());
 
             // 提取内部类（递归处理）
@@ -261,9 +263,11 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
                     .forEach(innerCls -> {
                         String innerName = innerCls.getNameAsString();
                         String innerFullyQualified = fullyQualifiedName + "$" + innerName;
+                        String innerSig = buildClassSignature(innerCls);
                         entities.add(Entity.builder()
                                 .name(innerFullyQualified)
                                 .kind(EntityKind.CLASS)
+                                .signature(innerSig)
                                 .build());
                     });
         });
@@ -283,14 +287,52 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
                         .collect(Collectors.joining(","));
                 String fullyQualifiedName = parentFullName + "#" + method.getNameAsString() + "(" + params + ")";
 
+                String methodSig = buildMethodSignature(method);
                 entities.add(Entity.builder()
                         .name(fullyQualifiedName)
                         .kind(EntityKind.METHOD)
+                        .signature(methodSig)
                         .build());
             }
         });
 
         return entities;
+    }
+
+    /**
+     * 构建类的结构化签名: "SuperName:InterfaceList:fieldCount:methodSig1;methodSig2;..."
+     */
+    private @NonNull String buildClassSignature(@NonNull ClassOrInterfaceDeclaration cls) {
+        String superName = cls.getExtendedTypes().stream()
+                .map(Node::toString)
+                .findFirst()
+                .orElse("");
+        String interfaces = cls.getImplementedTypes().stream()
+                .map(Node::toString)
+                .sorted()
+                .collect(Collectors.joining(","));
+        int fieldCount = (int) cls.getFields().size();
+        String methodSigs = cls.getMethods().stream()
+                .map(m -> m.getNameAsString() + "(" + m.getParameters().stream()
+                        .map(p -> p.getType().asString())
+                        .collect(Collectors.joining(",")) + ")")
+                .sorted()
+                .collect(Collectors.joining(";"));
+        return superName + ":" + interfaces + ":" + fieldCount + ":" + methodSigs;
+    }
+
+    /**
+     * 构建方法的结构化签名: "ReturnType:Param1,Param2:bodyHash"
+     */
+    private @NonNull String buildMethodSignature(@NonNull MethodDeclaration method) {
+        String returnType = method.getType().asString();
+        String params = method.getParameters().stream()
+                .map(p -> p.getType().asString())
+                .collect(Collectors.joining(","));
+        String bodyHash = method.getBody()
+                .map(b -> Integer.toHexString(b.toString().hashCode()))
+                .orElse("0");
+        return returnType + ":" + params + ":" + bodyHash;
     }
 
     /**
