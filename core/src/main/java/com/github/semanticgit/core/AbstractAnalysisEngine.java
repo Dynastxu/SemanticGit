@@ -1,17 +1,15 @@
 package com.github.semanticgit.core;
 
-import org.jspecify.annotations.Nullable;
-
 import java.io.File;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 
 abstract class AbstractAnalysisEngine {
-    @Nullable
-    protected CompletableFuture<Void> fullAnalysisFuture;
-    @Nullable
-    protected CompletableFuture<Void> incrementalAnalysisFuture;
+    protected Map<Integer, CompletableFuture<Void>> fullAnalysisFutures = new ConcurrentHashMap<>();
+    protected Map<Integer, CompletableFuture<Void>> incrementalAnalysisFutures = new ConcurrentHashMap<>();
 
     /**
      * 全量分析
@@ -19,9 +17,10 @@ abstract class AbstractAnalysisEngine {
      * @param repoPath    仓库路径
      * @param databaseDir 数据库保存的文件夹路径
      * @return 是否成功
+     * @since d9.13
      * @deprecated Use {@link #fullAnalysisAsync} instead
      */
-    @Deprecated
+    @Deprecated(forRemoval = true)
     public abstract boolean fullAnalysis(String repoPath, String databaseDir);
 
     /**
@@ -54,6 +53,6 @@ abstract class AbstractAnalysisEngine {
      * @return 数据库文件是否存在
      * @deprecated 由调用方自行判断
      */
-    @Deprecated
+    @Deprecated(forRemoval = true)
     public abstract boolean isDatabaseExists(String repoPath, String databaseDir);
 }

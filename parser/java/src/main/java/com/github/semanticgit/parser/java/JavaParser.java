@@ -306,12 +306,6 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
     }
 
     @Override
-    @Deprecated
-    public int parseChangeNatureFlag(SourceCode sourceCodeBefore, SourceCode sourceCodeAfter, String entityName) {
-        return 0;
-    }
-
-    @Override
     public List<EntityChange> parseChangeNatureFlags(SourceCode sourceCodeBefore, SourceCode sourceCodeAfter) {
         List<EntityChange> changes = new ArrayList<>();
 
