@@ -9,8 +9,8 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 
 abstract class AbstractAnalysisEngine {
-    protected Map<Integer, CompletableFuture<Void>> fullAnalysisFutures = new ConcurrentHashMap<>();
-    protected Map<Integer, CompletableFuture<Void>> incrementalAnalysisFutures = new ConcurrentHashMap<>();
+    protected final Map<Integer, CompletableFuture<Void>> fullAnalysisFutures = new ConcurrentHashMap<>();
+    protected final Map<Integer, CompletableFuture<Void>> incrementalAnalysisFutures = new ConcurrentHashMap<>();
 
     /**
      * 全量分析

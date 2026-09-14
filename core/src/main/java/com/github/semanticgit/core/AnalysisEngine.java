@@ -35,31 +35,25 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
     @Override
     public CompletableFuture<Void> fullAnalysisAsync(String repoPath, String databaseDir, String databaseName, Consumer<Float> onProgress, Function<Throwable, Void> onError) {
         int hash = Objects.hash(repoPath, databaseDir, databaseName);
-        if (fullAnalysisFutures.containsKey(hash)) {
-            if (fullAnalysisFutures.get(hash).isDone()) {
-                fullAnalysisFutures.remove(hash);
-            } else {
-                return fullAnalysisFutures.get(hash);
-            }
-        }
 
-        CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
-            try {
-                runFullAnalysis(repoPath, databaseDir, databaseName, onProgress);
-            } catch (Exception e) {
-                throw new CompletionException(e);
+        return fullAnalysisFutures.compute(hash, (_, existing) -> {
+            if (existing != null && !existing.isDone()) {
+                return existing;
             }
-        }).exceptionally(e -> {
-            log.error("Full analysis failed", e);
-            if (onError != null) {
-                onError.apply(e);
-            }
-            return null;
+            return CompletableFuture.runAsync(() -> {
+                try {
+                    runFullAnalysis(repoPath, databaseDir, databaseName, onProgress);
+                } catch (Exception e) {
+                    throw new CompletionException(e);
+                }
+            }).exceptionally(e -> {
+                log.error("Full analysis failed", e);
+                if (onError != null) {
+                    onError.apply(e);
+                }
+                return null;
+            }).whenComplete((_, _) -> fullAnalysisFutures.remove(hash));
         });
-
-        fullAnalysisFutures.put(hash, future);
-        return future;
-
     }
 
     private void runFullAnalysis(String repoPath, String databaseDir, String databaseName,
