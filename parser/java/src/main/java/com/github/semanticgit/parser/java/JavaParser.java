@@ -23,12 +23,6 @@ import java.util.stream.Collectors;
 @NoArgsConstructor
 public class JavaParser extends AbstractParser<JavaParserConfig> {
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
-    private static final ParsingResult OOM_FALLBACK = ParsingResult.builder()
-            .entities(Collections.emptyList())
-            .quality(DataQuality.FILE)
-            .qualityRemark("OUT_OF_MEMORY")
-            .parseDurationMs(0)
-            .build();
 
     public JavaParser(JavaParserConfig config) {
         super(config);
@@ -43,18 +37,6 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
             } catch (Exception e) {
                 log.error("Parse error for {}: {}", sourceCode.getFilePath(), e.getMessage());
                 return buildFallbackResult(DataQuality.FILE, "CRASHED: " + e.getClass().getSimpleName());
-            } catch (OutOfMemoryError e) {
-                System.gc();
-
-                // 短暂让出 CPU，给 GC 时间执行
-                try {
-                    Thread.sleep(100);
-                } catch (InterruptedException ignored) {
-                    Thread.currentThread().interrupt();
-                }
-
-                log.error("Out of memory when parsing {}: {}", sourceCode.getFilePath(), e.getMessage());
-                return OOM_FALLBACK;
             }
         });
 
