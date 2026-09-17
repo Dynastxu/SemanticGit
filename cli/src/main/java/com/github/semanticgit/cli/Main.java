@@ -7,6 +7,8 @@ import picocli.CommandLine;
 @CommandLine.Command(
         name = "semgit",
         mixinStandardHelpOptions = true,
+        resourceBundle = "i18n.messages",
+        description = "SemanticGit - Semantic Git repository analysis tool",
         version = "0.0.0",
         subcommands = {
                 AnalyzeCommand.class,

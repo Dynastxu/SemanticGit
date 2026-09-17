@@ -14,33 +14,33 @@ import java.nio.file.Path;
 public class AnalyzeCommand implements Runnable {
     @CommandLine.Parameters(
             index = "0",
-            description = "The repository path"
+            descriptionKey = "analyze.repoPath"
     )
     Path repoPath;
 
     @CommandLine.Option(
             names = {"-d", "--db-dir"},
-            description = "The database directory",
+            descriptionKey = "analyze.dbDir",
             defaultValue = "${user.home}/.semanticgit/db"
     )
     Path dbDir;
 
     @CommandLine.Option(
             names = {"-n", "--db-name"},
-            description = "The database file name (without extension)"
+            descriptionKey = "analyze.dbFileName"
     )
     String dbFileName;
 
     @CommandLine.Option(
             names = {"-o", "--overwrite"},
-            description = "Overwrite the database file",
+            descriptionKey = "analyze.overwrite",
             defaultValue = "false"
     )
     boolean overwrite;
 
     @CommandLine.Option(
             names = {"-f", "--full"},
-            description = "Perform a full analysis",
+            descriptionKey = "analyze.fullAnalysis",
             defaultValue = "false"
     )
     boolean fullAnalysis;

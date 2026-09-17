@@ -15,7 +15,7 @@ import java.nio.file.Path;
 public class StatisticsCommand implements Runnable {
     @CommandLine.Parameters(
             index = "0",
-            description = "The database file path"
+            descriptionKey = "stat.dbFilePath"
     )
     Path dbFilePath;
 
