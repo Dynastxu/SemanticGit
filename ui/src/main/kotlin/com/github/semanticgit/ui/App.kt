@@ -32,18 +32,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowScope
+import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.github.semanticgit.ui.page.RepoPage
 
 fun main() = application {
+    val windowState = rememberWindowState(width = 1200.dp, height = 800.dp)
     Window(
         onCloseRequest = ::exitApplication,
         title = "SemanticGit",
-        state = rememberWindowState(width = 1200.dp, height = 800.dp),
+        state = windowState,          // ← 绑定到 Window
         undecorated = true
     ) {
-        var themeMode by remember { mutableStateOf(ThemeMode.Dark) }
+        var themeMode by remember { mutableStateOf(ThemeMode.Light) }
 
         val lyricist = rememberStrings(
             translations = mapOf(
@@ -56,17 +58,20 @@ fun main() = application {
         ProvideStrings(lyricist, LocalStrings) {
             SemanticGitTheme(themeMode = themeMode) {
                 SemanticGitApp(
+                    windowState = windowState,      // ← 新增传参
                     themeMode = themeMode,
                     onToggleTheme = { themeMode = if (themeMode == ThemeMode.Dark) ThemeMode.Light else ThemeMode.Dark },
                     onClose = ::exitApplication
                 )
             }
         }
+
     }
 }
 
 @Composable
 private fun WindowScope.SemanticGitApp(
+    windowState: WindowState,
     themeMode: ThemeMode,
     onToggleTheme: () -> Unit,
     onClose: () -> Unit
@@ -115,6 +120,7 @@ private fun WindowScope.SemanticGitApp(
     Column(modifier = Modifier.fillMaxSize()) {
         TitleBar(
             title = strings.appTitle,
+            windowState = windowState,
             themeMode = themeMode,
             onToggleTheme = onToggleTheme,
             onClose = onClose
