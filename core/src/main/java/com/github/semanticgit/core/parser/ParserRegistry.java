@@ -6,8 +6,10 @@ import com.github.semanticgit.parser.java.RawJavaParser;
 import com.github.semanticgit.parser.java.api.LanguageParser;
 import com.github.semanticgit.parser.java.api.ParserConfig;
 import com.github.semanticgit.parser.java.api.RawLanguageParser;
+import org.jetbrains.annotations.UnmodifiableView;
 import org.jspecify.annotations.NonNull;
 
+import java.util.Collections;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.Map;
@@ -24,6 +26,26 @@ public class ParserRegistry {
 
     static {
         registerParser(RawJavaParser::new, RawJavaParser::new);
+    }
+
+    public static void setConfig(String key, ConfigItem<?> config) {
+        configMap.put(key, config);
+    }
+
+    public static void resetConfig(String key) {
+        configMap.get(key).reset();
+    }
+
+    public static void resetConfigs() {
+        configMap.forEach((_, v) -> v.reset());
+    }
+
+    public static ConfigItem<?> getConfig(String key) {
+        return configMap.get(key);
+    }
+
+    public static @NonNull @UnmodifiableView Map<String, ConfigItem<?>> getConfigs() {
+        return Collections.unmodifiableMap(configMap);
     }
 
     @Deprecated
