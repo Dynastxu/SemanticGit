@@ -102,11 +102,28 @@ public class GitService implements AutoCloseable {
                                 .email(email)
                                 .build()
                 );
+                CommitMeta parent = null;
+                if (rev.getParentCount() > 0) {
+                    RevCommit p = rev.getParent(0);
+                    PersonIdent pIdent = p.getAuthorIdent();
+                    parent = CommitMeta.builder()
+                            .hash(p.getId().getName())
+                            .author(authorCache.computeIfAbsent(
+                                    pIdent.getEmailAddress(),
+                                    email -> Author.builder()
+                                            .name(pIdent.getName())
+                                            .email(email)
+                                            .build()))
+                            .timestamp(p.getCommitTime())
+                            .message(p.getFullMessage())
+                            .build();
+                }
                 result.add(CommitMeta.builder()
                         .hash(rev.getId().getName())
                         .author(author)
                         .timestamp(rev.getCommitTime())
                         .message(rev.getFullMessage())
+                        .parentCommitMeta(parent)
                         .build());
             }
         }

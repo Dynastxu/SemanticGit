@@ -1,14 +1,14 @@
 package com.github.semanticgit.core.dao.impl;
 
-import com.github.semanticgit.common.entity.ChangeLog;
-import com.github.semanticgit.common.entity.Entity;
+import com.github.semanticgit.common.entity.*;
 import com.github.semanticgit.core.dao.ChangeLogDao;
 import com.github.semanticgit.core.db.DatabaseManager;
-import com.github.semanticgit.core.dto.SimpleEntityChangeStatistics;
+import com.github.semanticgit.core.dto.EntityChangeHistory;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.NonNull;
 
 import java.sql.*;
+import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 
@@ -175,6 +175,134 @@ public class ChangeLogDaoImpl implements ChangeLogDao {
         ps.setBytes(2, hashBytes);
         ps.setBytes(3, hashBytes);
         return ps.executeQuery();
+    }
+
+    @Override
+    public EntityChangeHistory queryEntityChangeHistory(String entityName, String refName) {
+        List<ChangeLog> changes = new ArrayList<>();
+        try {
+            Long headCommitId = resolveRefCommitId(refName);
+            if (headCommitId == null) {
+                log.warn("Ref not found: {}", refName);
+                return EntityChangeHistory.builder().changes(changes).build();
+            }
+
+            String sql = """
+                        WITH RECURSIVE commit_chain AS (
+                            SELECT cm.id, cm.hash, cm.timestamp, cm.message,
+                                   a.name AS author_name, a.email AS author_email,
+                                   0 AS depth
+                            FROM commit_meta cm
+                            JOIN author a ON cm.author_id = a.id
+                            WHERE cm.id = ?
+                            UNION ALL
+                            SELECT cm.id, cm.hash, cm.timestamp, cm.message,
+                                   a.name AS author_name, a.email AS author_email,
+                                   cc.depth + 1
+                            FROM commit_meta cm
+                            JOIN author a ON cm.author_id = a.id
+                            JOIN commit_chain cc ON cm.id = cc.parent_commit_id
+                        )
+                        SELECT
+                            cl.id AS change_log_id,
+                            cc.hash AS commit_hash,
+                            cc.timestamp AS commit_timestamp,
+                            cc.message AS commit_message,
+                            cc.author_name,
+                            cc.author_email,
+                            e.id AS entity_id,
+                            e.name AS entity_name,
+                            e.language AS entity_language,
+                            e.kind AS entity_kind,
+                            cl.file_path,
+                            cl.operation,
+                            cl.nature_flag,
+                            cl.data_quality,
+                            cl.analysis_type,
+                            pe.id AS parent_entity_id,
+                            pe.name AS parent_entity_name,
+                            pe.language AS parent_entity_language,
+                            pe.kind AS parent_entity_kind
+                        FROM change_log cl
+                        JOIN entity e ON cl.entity_id = e.id
+                        JOIN commit_chain cc ON cl.commit_id = cc.id
+                        LEFT JOIN entity pe ON cl.parent_entity_id = pe.id
+                        WHERE e.name = ?
+                        ORDER BY cc.depth DESC
+                        """;
+            try (PreparedStatement ps = dbManager.getConnection().prepareStatement(sql)) {
+                ps.setLong(1, headCommitId);
+                ps.setString(2, entityName);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        changes.add(buildChangeLog(rs));
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to query entity change history for entity={} ref={}", entityName, refName, e);
+        }
+        return EntityChangeHistory.builder().changes(changes).build();
+    }
+
+    private Long resolveRefCommitId(String refName) throws SQLException {
+        String sql = "SELECT commit_id FROM ref WHERE name = ?";
+        try (PreparedStatement ps = dbManager.getConnection().prepareStatement(sql)) {
+            ps.setString(1, refName);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getLong("commit_id");
+                }
+            }
+        }
+        return null;
+    }
+
+    private ChangeLog buildChangeLog(ResultSet rs) throws SQLException {
+        byte[] hashBytes = rs.getBytes("commit_hash");
+        String hash = HexFormat.of().formatHex(hashBytes);
+
+        Author author = Author.builder()
+                .name(rs.getString("author_name"))
+                .email(rs.getString("author_email"))
+                .build();
+
+        CommitMeta commit = CommitMeta.builder()
+                .hash(hash)
+                .author(author)
+                .timestamp(rs.getInt("commit_timestamp"))
+                .message(rs.getString("commit_message"))
+                .build();
+
+        Entity entity = Entity.builder()
+                .id(rs.getLong("entity_id"))
+                .name(rs.getString("entity_name"))
+                .language(EntityLanguage.fromCode(rs.getInt("entity_language")))
+                .kind(EntityKind.fromCode(rs.getInt("entity_kind")))
+                .build();
+
+        long parentEntityId = rs.getLong("parent_entity_id");
+        Entity parentEntity = null;
+        if (!rs.wasNull()) {
+            parentEntity = Entity.builder()
+                    .id(parentEntityId)
+                    .name(rs.getString("parent_entity_name"))
+                    .language(EntityLanguage.fromCode(rs.getInt("parent_entity_language")))
+                    .kind(EntityKind.fromCode(rs.getInt("parent_entity_kind")))
+                    .build();
+        }
+
+        return ChangeLog.builder()
+                .id(rs.getLong("change_log_id"))
+                .commit(commit)
+                .entity(entity)
+                .filePath(rs.getString("file_path"))
+                .operation(ChangeOperation.fromCode(rs.getInt("operation")))
+                .natureFlagCode(rs.getInt("nature_flag"))
+                .parentEntity(parentEntity)
+                .dataQuality(DataQuality.fromCode(rs.getInt("data_quality")))
+                .analysisType(AnalysisType.fromCode(rs.getInt("analysis_type")))
+                .build();
     }
 
     private @NonNull Long resolveCommitId(Connection conn, String hash) throws SQLException {

@@ -8,6 +8,7 @@ import com.github.semanticgit.core.dao.impl.ChangeLogDaoImpl;
 import com.github.semanticgit.core.dao.impl.CommitMetaDaoImpl;
 import com.github.semanticgit.core.db.DatabaseManager;
 import com.github.semanticgit.core.dto.CommitEntityChangeStatistics;
+import com.github.semanticgit.core.dto.EntityChangeHistory;
 import com.github.semanticgit.core.dto.SimpleEntityChangeStatistics;
 import lombok.extern.slf4j.Slf4j;
 
@@ -119,6 +120,12 @@ public class StatisticsProvider extends AbstractStatisticsProvider {
             log.error("Failed to get commit entity change statistics for hash: {}", hash, e);
             return null;
         }
+    }
+
+    @Override
+    public EntityChangeHistory getEntityChangeHistory(String entityName, String refName) {
+        ChangeLogDao changeLogDao = new ChangeLogDaoImpl(dbManager);
+        return changeLogDao.queryEntityChangeHistory(entityName, refName);
     }
 
     private int countCommits() {

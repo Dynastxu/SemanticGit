@@ -68,7 +68,9 @@ public class DatabaseManager implements AutoCloseable {
                             author_id INTEGER NOT NULL,
                             timestamp INTEGER NOT NULL,
                             message TEXT,
-                            FOREIGN KEY (author_id) REFERENCES author(id)
+                            parent_commit_id INTEGER,
+                            FOREIGN KEY (author_id) REFERENCES author(id),
+                            FOREIGN KEY (parent_commit_id) REFERENCES commit_meta(id)
                         )
                     """);
 
@@ -96,6 +98,15 @@ public class DatabaseManager implements AutoCloseable {
                             FOREIGN KEY (commit_id) REFERENCES commit_meta(id),
                             FOREIGN KEY (entity_id) REFERENCES entity(id),
                             FOREIGN KEY (parent_entity_id) REFERENCES entity(id)
+                        )
+                    """);
+
+            stmt.execute("""
+                        CREATE TABLE IF NOT EXISTS ref (
+                            name TEXT NOT NULL PRIMARY KEY,
+                            kind INTEGER NOT NULL,
+                            commit_id INTEGER NOT NULL,
+                            FOREIGN KEY (commit_id) REFERENCES commit_meta(id)
                         )
                     """);
             log.info("Database tables initialized successfully");

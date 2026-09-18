@@ -15,4 +15,5 @@ public class CommitMeta {
     private Author author;
     private Integer timestamp;
     private String message;
+    private CommitMeta parentCommitMeta;
 }
