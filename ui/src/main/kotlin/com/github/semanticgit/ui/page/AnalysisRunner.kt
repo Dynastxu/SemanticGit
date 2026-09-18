@@ -45,11 +45,36 @@ object DefaultAnalysisRunner : AnalysisRunner {
         settings: ParserSettings
     ): AnalysisRunResult {
         // TODO: 等 core 支持配置后，把 settings 转换后传进去
-        val engine = AnalysisEngine()
-        val success = engine.fullAnalysis(repoPath, dbDir)
-        return AnalysisRunResult(
-            success = success,
-            failMessage = engine.failMessage
-        )
+        return try {
+            val engine = AnalysisEngine()
+            val dbName = java.io.File(repoPath).absolutePath.hashCode().toString(16)
+
+            // 使用新的异步 API，但在此处阻塞等待结果以保持接口兼容
+            var errorMessage: String? = null
+            val future = engine.fullAnalysisAsync(
+                repoPath,
+                dbDir,
+                dbName,
+                { /* 进度回调，暂不处理 */ },
+                { e ->
+                    errorMessage = e.message ?: "Unknown error"
+                    null
+                }
+            )
+
+            // 阻塞等待完成
+            future.join()
+
+            if (errorMessage != null) {
+                AnalysisRunResult(success = false, failMessage = errorMessage)
+            } else {
+                AnalysisRunResult(success = true)
+            }
+        } catch (e: Exception) {
+            AnalysisRunResult(
+                success = false,
+                failMessage = e.message ?: "Analysis failed"
+            )
+        }
     }
 }
