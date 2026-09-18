@@ -11,4 +11,5 @@ public interface ChangeLogDao {
     void save(ChangeLog changeLog);
     void saveAll(List<ChangeLog> changeLogs);
     ResultSet querySimpleEntityChangeStatistics() throws SQLException;
+    ResultSet queryCommitEntityChangeStatistics(String hash) throws SQLException;
 }

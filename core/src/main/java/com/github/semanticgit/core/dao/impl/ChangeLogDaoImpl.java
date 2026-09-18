@@ -128,6 +128,55 @@ public class ChangeLogDaoImpl implements ChangeLogDao {
                      """);
     }
 
+    @Override
+    public ResultSet queryCommitEntityChangeStatistics(String hash) throws SQLException {
+        byte[] hashBytes = HexFormat.of().parseHex(hash);
+        String sql = """
+                     WITH total AS (
+                         SELECT COUNT(*) AS cnt
+                         FROM change_log cl
+                         JOIN commit_meta cm ON cl.commit_id = cm.id
+                         WHERE cm.hash = ?
+                     ),
+                     op_stats AS (
+                         SELECT
+                             cl.operation AS value,
+                             CAST(COUNT(*) AS REAL) / (SELECT cnt FROM total) AS operation_ratio
+                         FROM change_log cl
+                         JOIN commit_meta cm ON cl.commit_id = cm.id
+                         WHERE cm.hash = ?
+                         GROUP BY cl.operation
+                     ),
+                     nf_stats AS (
+                         SELECT
+                             COALESCE(cl.nature_flag, 0) AS value,
+                             CAST(COUNT(*) AS REAL) / (SELECT cnt FROM total) AS nature_flag_ratio
+                         FROM change_log cl
+                         JOIN commit_meta cm ON cl.commit_id = cm.id
+                         WHERE cm.hash = ?
+                         GROUP BY cl.nature_flag
+                     ),
+                     all_values AS (
+                         SELECT value FROM op_stats
+                         UNION
+                         SELECT value FROM nf_stats
+                     )
+                     SELECT
+                         av.value,
+                         ROUND(COALESCE(op.operation_ratio, 0), 6) AS operation_ratio,
+                         ROUND(COALESCE(nf.nature_flag_ratio, 0), 6) AS nature_flag_ratio
+                     FROM all_values av
+                     LEFT JOIN op_stats op ON op.value = av.value
+                     LEFT JOIN nf_stats nf ON nf.value = av.value
+                     ORDER BY av.value;
+                     """;
+        PreparedStatement ps = dbManager.getConnection().prepareStatement(sql);
+        ps.setBytes(1, hashBytes);
+        ps.setBytes(2, hashBytes);
+        ps.setBytes(3, hashBytes);
+        return ps.executeQuery();
+    }
+
     private @NonNull Long resolveCommitId(Connection conn, String hash) throws SQLException {
         byte[] hashBytes;
         try {

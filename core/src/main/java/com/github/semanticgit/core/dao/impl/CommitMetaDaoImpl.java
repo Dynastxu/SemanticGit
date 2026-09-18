@@ -65,6 +65,36 @@ public class CommitMetaDaoImpl implements CommitMetaDao {
         }
     }
 
+    @Override
+    public CommitMeta findByHash(String hash) throws SQLException {
+        byte[] hashBytes = HexFormat.of().parseHex(hash);
+        String sql = """
+            SELECT cm.id, cm.timestamp, cm.message, a.name, a.email
+            FROM commit_meta cm
+            JOIN author a ON cm.author_id = a.id
+            WHERE cm.hash = ?
+            """;
+        try (PreparedStatement ps = dbManager.getConnection().prepareStatement(sql)) {
+            ps.setBytes(1, hashBytes);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    Author author = Author.builder()
+                            .name(rs.getString("name"))
+                            .email(rs.getString("email"))
+                            .build();
+                    return CommitMeta.builder()
+                            .id(rs.getLong("id"))
+                            .hash(hash)
+                            .author(author)
+                            .timestamp(rs.getInt("timestamp"))
+                            .message(rs.getString("message"))
+                            .build();
+                }
+            }
+        }
+        return null;
+    }
+
     private @NonNull Long upsertAuthor(Connection conn, @NonNull Author author) throws SQLException {
         String sql = """
             INSERT INTO author (name, email) VALUES (?, ?)
