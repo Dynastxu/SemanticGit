@@ -29,12 +29,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+
 @Slf4j
 public class AnalysisEngine extends AbstractAnalysisEngine {
     @Getter
     private String failReason = "";
     @Getter
     private String failMessage = "";
+
 
     @Override
     public boolean fullAnalysis(String repoPath, String databaseDir) {

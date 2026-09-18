@@ -10,48 +10,70 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.github.semanticgit.common.entity.ChangeNatureFlag
 import com.github.semanticgit.common.entity.ChangeOperation
-import com.github.semanticgit.core.AnalysisEngine
 import com.github.semanticgit.core.StatisticsProvider
 import com.github.semanticgit.core.db.DatabaseManager
 import com.github.semanticgit.core.dto.SimpleEntityChangeStatistics
 import com.github.semanticgit.ui.LocalStrings
 import com.github.semanticgit.ui.chart.EChartsView
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import javax.swing.JFileChooser
+
+/**
+ * 解析器配置
+ */
+data class ParserSettings(
+    val timeoutMs: Long = 5000L,
+    val maxParseSizeMb: Long = 5L,
+    val maxRegexSizeMb: Long = 2L
+) {
+    val maxParseSizeBytes: Long get() = maxParseSizeMb * 1024 * 1024
+    val maxRegexSizeBytes: Long get() = maxRegexSizeMb * 1024 * 1024
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RepoPage(modifier: Modifier = Modifier) {
     val strings = LocalStrings.current
+    val scope = rememberCoroutineScope()
+
     val repoPaths = remember { mutableStateListOf<String>() }
     var selectedIndex by remember { mutableStateOf(-1) }
     var dropdownExpanded by remember { mutableStateOf(false) }
@@ -60,50 +82,72 @@ fun RepoPage(modifier: Modifier = Modifier) {
         computeDisplayNames(repoPaths.toList())
     }
 
-    var isLoading by remember { mutableStateOf(false) }
+    // ============ 配置状态 ============
+    var timeoutMsText by remember { mutableStateOf("5000") }
+    var maxParseSizeMbText by remember { mutableStateOf("5") }
+    var maxRegexSizeMbText by remember { mutableStateOf("2") }
+
+    // ============ 分析状态 ============
+    var isAnalyzing by remember { mutableStateOf(false) }
+    var showResult by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var statistics by remember { mutableStateOf<SimpleEntityChangeStatistics?>(null) }
 
     val selectedPath = repoPaths.getOrNull(selectedIndex)
 
-    LaunchedEffect(selectedPath) {
-        if (selectedPath == null) {
-            statistics = null
+    fun buildSettings(): ParserSettings = ParserSettings(
+        timeoutMs = timeoutMsText.toLongOrNull() ?: 5000L,
+        maxParseSizeMb = maxParseSizeMbText.toLongOrNull() ?: 5L,
+        maxRegexSizeMb = maxRegexSizeMbText.toLongOrNull() ?: 2L
+    )
+
+    fun startAnalysis() {
+        val path = selectedPath ?: return
+        val settings = buildSettings()
+
+        scope.launch {
+            isAnalyzing = true
+            showResult = true
             errorMessage = null
-            return@LaunchedEffect
-        }
-        isLoading = true
-        errorMessage = null
-        statistics = null
+            statistics = null
 
-        withContext(Dispatchers.IO) {
-            val dbDir = "${System.getProperty("user.home")}/.semanticgit/db"
-            val engine = AnalysisEngine()
+            try {
+                withContext(Dispatchers.IO) {
+                    val dbDir = "${System.getProperty("user.home")}/.semanticgit/db"
+                    val runner = DefaultAnalysisRunner
 
-            if (!engine.isDatabaseExists(selectedPath, dbDir)) {
-                val success = engine.fullAnalysis(selectedPath, dbDir)
-                if (!success) {
-                    errorMessage = engine.failMessage.ifBlank { strings.repoAnalysisFailed }
-                    return@withContext
+                    if (!runner.isDatabaseExists(path, dbDir, settings)) {
+                        val result = runner.fullAnalysis(path, dbDir, settings)
+                        if (!result.success) {
+                            errorMessage = result.failMessage.ifBlank { strings.repoAnalysisFailed }
+                            return@withContext
+                        }
+                    }
+
+                    val dbName = Integer.toHexString(File(path).absolutePath.hashCode())
+                    DatabaseManager(dbDir, dbName, false).use { dbManager ->
+                        val provider = StatisticsProvider(dbManager)
+                        val stats = provider.simpleEntityChangeStatistics
+                        if (stats == null || !stats.isSuccess) {
+                            errorMessage = strings.repoAnalysisFailed
+                        } else {
+                            statistics = stats
+                        }
+                    }
                 }
-            }
-
-            val dbName = Integer.toHexString(File(selectedPath).absolutePath.hashCode())
-            DatabaseManager(dbDir, dbName, false).use { dbManager ->
-                val provider = StatisticsProvider(dbManager)
-                statistics = provider.simpleEntityChangeStatistics
-                if (!statistics!!.isSuccess) {
-                    errorMessage = strings.repoAnalysisFailed
-                }
+            } catch (e: Exception) {
+                errorMessage = e.message ?: strings.repoAnalysisFailed
+                e.printStackTrace()
+            } finally {
+                isAnalyzing = false
             }
         }
-
-        isLoading = false
     }
 
     Column(
         modifier = modifier.fillMaxSize().padding(16.dp)
     ) {
+        // ============ 顶部：仓库选择 ============
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -122,7 +166,9 @@ fun RepoPage(modifier: Modifier = Modifier) {
                     trailingIcon = {
                         ExposedDropdownMenuDefaults.TrailingIcon(expanded = dropdownExpanded)
                     },
-                    modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
+                    modifier = Modifier
+                        .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+                        .fillMaxWidth(),
                     singleLine = true
                 )
 
@@ -130,12 +176,15 @@ fun RepoPage(modifier: Modifier = Modifier) {
                     expanded = dropdownExpanded,
                     onDismissRequest = { dropdownExpanded = false }
                 ) {
-                    repoPaths.forEachIndexed { index, path ->
+                    repoPaths.forEachIndexed { index, _ ->
                         DropdownMenuItem(
                             text = { Text(displayNames[index]) },
                             onClick = {
                                 selectedIndex = index
                                 dropdownExpanded = false
+                                showResult = false
+                                statistics = null       // 切仓库时清空
+                                errorMessage = null
                             },
                             contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding
                         )
@@ -149,66 +198,283 @@ fun RepoPage(modifier: Modifier = Modifier) {
                 chooser.dialogTitle = strings.repoSelectFolder
                 val result = chooser.showOpenDialog(null)
                 if (result == JFileChooser.APPROVE_OPTION) {
-                    val selectedPath = chooser.selectedFile.absolutePath
-                    val existingIndex = repoPaths.indexOf(selectedPath)
+                    val newPath = chooser.selectedFile.absolutePath
+                    val existingIndex = repoPaths.indexOf(newPath)
                     if (existingIndex >= 0) {
                         selectedIndex = existingIndex
                     } else {
-                        repoPaths.add(selectedPath)
+                        repoPaths.add(newPath)
                         selectedIndex = repoPaths.size - 1
                     }
+                    showResult = false
+                    statistics = null       // 切仓库时清空
+                    errorMessage = null
                 }
             }) {
                 Icon(
                     imageVector = Icons.Default.FolderOpen,
-                    contentDescription = strings.repoSelectFolder
+                    contentDescription = strings.repoSelectFolder,
+                    modifier = Modifier.size(24.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        if (selectedPath == null) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = strings.repoNoRepoSelected,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        } else if (isLoading) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator()
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = strings.repoAnalyzing,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+// ============ 主内容区 ============
+        Box(modifier = Modifier.fillMaxSize()) {
+            when {
+                selectedPath == null -> {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = strings.repoNoRepoSelected,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                showResult -> {
+                    // 结果视图：showResult = true 时才创建
+                    // 从配置切回结果时重新创建，图表重新加载
+                    ResultView(
+                        strings = strings,
+                        isAnalyzing = isAnalyzing,
+                        errorMessage = errorMessage,
+                        statistics = statistics,
+                        onBack = {
+                            showResult = false
+                            // 清空 statistics，保证下次分析时图表重新创建
+                            statistics = null
+                            errorMessage = null
+                        },
+                        onReanalyze = { startAnalysis() }
+                    )
+                }
+                else -> {
+                    // 配置视图
+                    ConfigView(
+                        timeoutMsText = timeoutMsText,
+                        onTimeoutMsTextChange = { timeoutMsText = it },
+                        maxParseSizeMbText = maxParseSizeMbText,
+                        onMaxParseSizeMbTextChange = { maxParseSizeMbText = it },
+                        maxRegexSizeMbText = maxRegexSizeMbText,
+                        onMaxRegexSizeMbTextChange = { maxRegexSizeMbText = it },
+                        onStartAnalysis = { startAnalysis() }
                     )
                 }
             }
-        } else if (errorMessage != null) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = errorMessage!!,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.error
-                )
-            }
-        } else {
-            StatisticsContent(strings = strings, statistics = statistics)
         }
     }
+}
+
+@Composable
+private fun ConfigView(
+    timeoutMsText: String,
+    onTimeoutMsTextChange: (String) -> Unit,
+    maxParseSizeMbText: String,
+    onMaxParseSizeMbTextChange: (String) -> Unit,
+    maxRegexSizeMbText: String,
+    onMaxRegexSizeMbTextChange: (String) -> Unit,
+    onStartAnalysis: () -> Unit
+) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+        ) {
+            Text(
+                text = "解析配置",
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = "这些配置会影响每个文件的解析策略。配置修改后点击「开始分析」生效。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            NumberField(
+                value = timeoutMsText,
+                onValueChange = onTimeoutMsTextChange,
+                label = "单文件解析超时（毫秒）"
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            NumberField(
+                value = maxParseSizeMbText,
+                onValueChange = onMaxParseSizeMbTextChange,
+                label = "超过此大小走文件级兜底（MB）"
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            NumberField(
+                value = maxRegexSizeMbText,
+                onValueChange = onMaxRegexSizeMbTextChange,
+                label = "正则降级最大文件大小（MB）"
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        HorizontalDivider()
+        Spacer(modifier = Modifier.height(12.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End
+        ) {
+            Button(onClick = onStartAnalysis) {
+                Text("开始分析")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ResultView(
+    strings: com.github.semanticgit.ui.Strings,
+    isAnalyzing: Boolean,
+    errorMessage: String?,
+    statistics: SimpleEntityChangeStatistics?,
+    onBack: () -> Unit,
+    onReanalyze: () -> Unit
+) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TextButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "返回配置")
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("返回配置")
+            }
+            Spacer(modifier = Modifier.weight(1f))
+            TextButton(onClick = onReanalyze) {
+                Text("重新分析")
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        when {
+            isAnalyzing -> {
+                AnalyzingView(strings = strings)
+            }
+            errorMessage != null -> {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = errorMessage,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+            statistics != null -> {
+                StatisticsContent(strings = strings, statistics = statistics)
+            }
+        }
+    }
+}
+
+@Composable
+private fun AnalyzingView(strings: com.github.semanticgit.ui.Strings) {
+    var elapsedSeconds by remember { mutableStateOf(0) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1000L)
+            elapsedSeconds++
+        }
+    }
+
+    val phase = when {
+        elapsedSeconds < 5 -> "正在读取仓库..."
+        elapsedSeconds < 20 -> "正在解析文件..."
+        elapsedSeconds < 60 -> "正在统计变更..."
+        else -> "正在生成图表..."
+    }
+
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.width(320.dp)
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(56.dp),
+                strokeWidth = 4.dp
+            )
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Text(
+                text = strings.repoAnalyzing,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = phase,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Text(
+                text = "已用时：${elapsedSeconds} 秒",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                text = "分析时间取决于仓库大小，请耐心等待",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun NumberField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = { newValue ->
+            if (newValue.isEmpty() || newValue.all { it.isDigit() }) {
+                onValueChange(newValue)
+            }
+        },
+        label = { Text(label) },
+        modifier = Modifier.fillMaxWidth(),
+        singleLine = true
+    )
 }
 
 @Composable
@@ -227,7 +493,7 @@ private fun StatisticsContent(
             text = "${strings.repoAnalysisStatus}: ${if (statistics.isSuccess) "OK" else "FAILED"}",
             style = MaterialTheme.typography.titleMedium,
             color = if (statistics.isSuccess) MaterialTheme.colorScheme.onSurface
-                    else MaterialTheme.colorScheme.error
+            else MaterialTheme.colorScheme.error
         )
 
         Spacer(modifier = Modifier.height(8.dp))
