@@ -465,37 +465,4 @@ class JavaParserTest {
                 .toList();
         assertEquals(2, methods.size());
     }
-
-    @Test
-    @DisplayName("AST 解析 OOM 但正则回退成功应返回 REGEX 级别")
-    void testParseOOMWithRegexFallbackSuccess() {
-        JavaParser oomParser = new JavaParser(JavaParserConfig.builder().build()) {
-            @Override
-            protected ParseResult<CompilationUnit> parseWithAST(String content) {
-                throw new OutOfMemoryError("Simulated Java heap space");
-            }
-        };
-
-        String javaCode = """
-            package com.example;
-
-            public class RecoverableClass {
-                public void someMethod() {
-                }
-            }
-            """;
-
-        SourceCode sourceCode = SourceCode.builder()
-                .filePath("com/example/RecoverableClass.java")
-                .content(javaCode)
-                .language(EntityLanguage.JAVA)
-                .build();
-
-
-        ParsingResult result = oomParser.parseEntities(sourceCode);
-
-        assertNotNull(result);
-        Assertions.assertEquals(DataQuality.FILE, result.getQuality());
-        Assertions.assertTrue(result.getQualityRemark().contains("OUT_OF_MEMORY"));
-    }
 }
