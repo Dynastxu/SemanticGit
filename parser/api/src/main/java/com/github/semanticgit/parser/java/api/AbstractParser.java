@@ -3,7 +3,7 @@ package com.github.semanticgit.parser.java.api;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
-
+@Deprecated
 @NoArgsConstructor(force = true)
 public abstract class AbstractParser<C extends ParserConfig> implements LanguageParser<C> {
     @Getter

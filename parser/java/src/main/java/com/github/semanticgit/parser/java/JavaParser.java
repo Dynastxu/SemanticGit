@@ -21,6 +21,7 @@ import java.util.stream.Collectors;
 
 @Slf4j
 @NoArgsConstructor
+@Deprecated(forRemoval = true)
 public class JavaParser extends AbstractParser<JavaParserConfig> {
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
 

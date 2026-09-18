@@ -6,6 +6,7 @@ import com.github.semanticgit.common.entity.EntityLanguage;
 import java.util.EnumSet;
 import java.util.List;
 
+@Deprecated
 public interface LanguageParser<C extends ParserConfig> {
     /**
      * 解析源码文件，提取类、方法等实体信息。

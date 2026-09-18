@@ -1,25 +1,34 @@
 package com.github.semanticgit.parser.java;
 
+import com.github.semanticgit.common.config.ConfigItem;
 import com.github.semanticgit.common.entity.ChangeNatureFlag;
 import com.github.semanticgit.common.entity.EntityLanguage;
 import com.github.semanticgit.parser.java.api.EntityChange;
+import com.github.semanticgit.parser.java.api.RawLanguageParser;
 import com.github.semanticgit.parser.java.api.SourceCode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-@Deprecated
-public class JavaParserChangeNatureTest {
+/**
+ * RawJavaParser 变更性质判断测试
+ * 用例设计与 {@link JavaParserChangeNatureTest} 保持一致。
+ */
+public class RawJavaParserChangeNatureTest {
 
-    private JavaParser parser;
+    private RawJavaParser parser;
 
     @BeforeEach
     void setUp() {
-        parser = new JavaParser(JavaParserConfig.builder().build());
+        Map<String, ConfigItem<?>> configMap = new HashMap<>();
+        RawLanguageParser.registerCommonConfigs(configMap);
+        parser = new RawJavaParser(configMap);
     }
 
     // ==================== parseEntityChangeNatureFlag ====================
@@ -103,7 +112,6 @@ public class JavaParserChangeNatureTest {
                 """;
 
         SourceCode after = sourceCode("Service.java", code);
-
         List<EntityChange> changes = parser.parseChangeNatureFlags(null, after);
         assertEquals(2, changes.size());
 
@@ -126,7 +134,6 @@ public class JavaParserChangeNatureTest {
                 """;
 
         SourceCode before = sourceCode("Service.java", code);
-
         List<EntityChange> changes = parser.parseChangeNatureFlags(before, null);
         assertEquals(2, changes.size());
 
@@ -216,7 +223,6 @@ public class JavaParserChangeNatureTest {
                 """;
 
         SourceCode after = sourceCode("src/test/java/CalcTest.java", code);
-
         List<EntityChange> changes = parser.parseChangeNatureFlags(null, after);
         for (EntityChange c : changes) {
             assertTrue((c.getFlags() & ChangeNatureFlag.TEST.code) != 0);

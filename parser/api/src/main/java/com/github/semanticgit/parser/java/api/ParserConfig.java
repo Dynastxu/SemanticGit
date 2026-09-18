@@ -3,6 +3,7 @@ package com.github.semanticgit.parser.java.api;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
 
+@Deprecated
 @Getter
 @SuperBuilder
 @NoArgsConstructor
