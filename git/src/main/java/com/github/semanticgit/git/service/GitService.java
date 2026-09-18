@@ -1,20 +1,24 @@
 package com.github.semanticgit.git.service;
 
 import com.github.semanticgit.common.entity.Author;
+import com.github.semanticgit.common.entity.ChangeOperation;
 import com.github.semanticgit.common.entity.CommitMeta;
 import com.github.semanticgit.git.dto.GitCommitInfo;
 import com.github.semanticgit.git.dto.GitDiffEntry;
-import com.github.semanticgit.common.entity.ChangeOperation;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.diff.DiffEntry;
 import org.eclipse.jgit.diff.DiffFormatter;
 import org.eclipse.jgit.diff.RawTextComparator;
+import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.ObjectLoader;
+import org.eclipse.jgit.lib.PersonIdent;
+import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
+import org.eclipse.jgit.treewalk.TreeWalk;
 import org.eclipse.jgit.util.io.DisabledOutputStream;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
@@ -23,131 +27,299 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+
 
 public class GitService implements AutoCloseable {
+
+    private static final int BINARY_SNIFF_LEN = 8000;
+    private static final long MAX_FILE_CONTENT_BYTES = 5L * 1024 * 1024;
+
     private final Repository repository;
     private final Git git;
+    private final boolean ownsRepository;
 
     public GitService(String repoPath) throws IOException {
-        FileRepositoryBuilder builder = new FileRepositoryBuilder();
-        // 兼容 .git 文件夹或工作区根目录
-        this.repository = builder.setGitDir(new File(repoPath + "/.git"))
-                .readEnvironment()
-                .findGitDir()
-                .build();
-        this.git = new Git(repository);
+        this(buildRepository(repoPath), true);
     }
 
-    public List<CommitMeta> getAllCommits() throws IOException {
+    /** 供测试/复用已有 Repository 使用。调用方负责关闭该 Repository */
+    public GitService(Repository repository) {
+        this(repository, false);
+    }
+
+    /** 私有主构造：统一初始化 */
+    private GitService(Repository repository, boolean ownsRepository) {
+        this.repository = repository;
+        this.git = new Git(repository);
+        this.ownsRepository = ownsRepository;
+    }
+
+    private static Repository buildRepository(String repoPath) throws IOException {
+        File repoFile = new File(repoPath).getAbsoluteFile();
+        File dotGit = new File(repoFile, ".git");
+        FileRepositoryBuilder builder = new FileRepositoryBuilder();
+
+        if (dotGit.isDirectory()) {
+            builder.setGitDir(dotGit).setWorkTree(repoFile);
+        } else if (new File(repoFile, "HEAD").isFile()
+                && new File(repoFile, "objects").isDirectory()) {
+            builder.setGitDir(repoFile);
+        } else {
+            builder.findGitDir(repoFile);
+        }
+        return builder.readEnvironment().build();
+    }
+
+    // ==================== 分支 / Ref ====================
+
+    /**
+     * 按分支取提交列表（时间倒序，最新在前）。
+     * @param branch 短名（"main"）、完整 ref（"refs/heads/main"）或 null（等价 HEAD）
+     */
+    public List<CommitMeta> getAllCommits(String branch) throws IOException {
         List<CommitMeta> result = new ArrayList<>();
-        List<Author> authors = new ArrayList<>();
+
+        ObjectId headId = resolveBranchOrHead(branch);
+        if (headId == null) {
+            return result; // 分支不存在，返回空表
+        }
+
+        Map<String, Author> authorCache = new HashMap<>();
+
         try (RevWalk walk = new RevWalk(repository)) {
-            ObjectId headId = repository.resolve("HEAD");
-            if (headId == null) {
-                return result;
-            }
             walk.markStart(walk.parseCommit(headId));
             for (RevCommit rev : walk) {
-                Author author = Author.builder()
-                        .name(rev.getAuthorIdent().getName())
-                        .email(rev.getAuthorIdent().getEmailAddress())
-                        .build();
-                if (!authors.contains(author)) {
-                    authors.add(author);
-                } else {
-                    author = authors.get(authors.indexOf(author));
+                PersonIdent ident = rev.getAuthorIdent();
+                Author author = authorCache.computeIfAbsent(
+                        ident.getEmailAddress(),
+                        email -> Author.builder()
+                                .name(ident.getName())
+                                .email(email)
+                                .build()
+                );
+                CommitMeta parent = null;
+                if (rev.getParentCount() > 0) {
+                    RevCommit p = rev.getParent(0);
+                    PersonIdent pIdent = p.getAuthorIdent();
+                    parent = CommitMeta.builder()
+                            .hash(p.getId().getName())
+                            .author(authorCache.computeIfAbsent(
+                                    pIdent.getEmailAddress(),
+                                    email -> Author.builder()
+                                            .name(pIdent.getName())
+                                            .email(email)
+                                            .build()))
+                            .timestamp(p.getCommitTime())
+                            .message(p.getFullMessage())
+                            .build();
                 }
-                CommitMeta meta = CommitMeta.builder()
+                result.add(CommitMeta.builder()
                         .hash(rev.getId().getName())
                         .author(author)
                         .timestamp(rev.getCommitTime())
                         .message(rev.getFullMessage())
-                        .build();
-                result.add(meta);
+                        .parentCommitMeta(parent)
+                        .build());
             }
         }
         return result;
     }
 
-    /**
-     * 获取两个提交之间的文件级快照对比（用于 AB 兜底）
-     */
-    public List<GitDiffEntry> getDiffBetweenCommits(String fromHash, String toHash) throws IOException, IllegalArgumentException {
-        ObjectId fromId = repository.resolve(fromHash + "^{tree}");
-        ObjectId toId = repository.resolve(toHash + "^{tree}");
+    /** 兼容旧调用：默认 HEAD */
+    public List<CommitMeta> getAllCommits() throws IOException {
+        return getAllCommits(null);
+    }
 
-        if (fromId == null || toId == null) {
-            throw new IllegalArgumentException("Invalid hash");
+    /** 列出所有本地分支短名，按字典序 */
+    public List<String> getBranches() throws IOException {
+        List<String> result = new ArrayList<>();
+        for (Ref ref : repository.getRefDatabase().getRefsByPrefix(Constants.R_HEADS)) {
+            result.add(Repository.shortenRefName(ref.getName()));
         }
+        Collections.sort(result);
+        return result;
+    }
 
-        try (DiffFormatter df = new DiffFormatter(DisabledOutputStream.INSTANCE)) {
-            df.setRepository(repository);
-            df.setDiffComparator(RawTextComparator.DEFAULT);
-            df.setDetectRenames(true); // 开启重命名检测
+    /** 通用 ref 解析。短名优先当本地分支，避免 tag 同名覆盖 */
+    public @Nullable String resolveRef(String ref) throws IOException {
+        if (ref == null || ref.isEmpty()) return null;
 
-            List<DiffEntry> entries = df.scan(fromId, toId);
-            List<GitDiffEntry> result = new ArrayList<>();
-            for (DiffEntry entry : entries) {
-                GitDiffEntry dto = new GitDiffEntry();
-                dto.setChangeOperation(mapChangeType(entry.getChangeType()));
-                dto.setOldPath(DiffEntry.DEV_NULL.equals(entry.getOldPath()) ? null : entry.getOldPath());
-                dto.setNewPath(DiffEntry.DEV_NULL.equals(entry.getNewPath()) ? null : entry.getNewPath());
-
-                // 一次性把文件内容读出来，方便后续 Parser 直接解析
-                // TODO 内存优化
-                if (entry.getChangeType() != DiffEntry.ChangeType.DELETE) {
-                    dto.setNewContent(getFileContent(toHash, entry.getNewPath()));
-                }
-                if (entry.getChangeType() != DiffEntry.ChangeType.ADD) {
-                    dto.setOldContent(getFileContent(fromHash, entry.getOldPath()));
-                }
-                result.add(dto);
+        if (!ref.contains("/") && !ref.contains("~") && !ref.contains("^")) {
+            Ref branch = repository.exactRef(Constants.R_HEADS + ref);
+            if (branch != null && branch.getObjectId() != null) {
+                return branch.getObjectId().getName();
             }
-            return result;
+        }
+        ObjectId id = repository.resolve(ref);
+        return id == null ? null : id.getName();
+    }
+
+    /** 当前 HEAD 指向的 commit hash。空仓库返回 null */
+    public @Nullable String getHeadCommit() throws IOException {
+        return resolveRef(Constants.HEAD);
+    }
+
+    /** 取指定本地分支 head。短名或 refs/heads/xxx 均可 */
+    public @Nullable String getBranchHead(String branchName) throws IOException {
+        if (branchName == null || branchName.isEmpty()) return null;
+        String fullName = branchName.startsWith(Constants.R_HEADS)
+                ? branchName
+                : Constants.R_HEADS + branchName;
+
+        Ref ref = repository.exactRef(fullName);
+        return (ref == null || ref.getObjectId() == null)
+                ? null
+                : ref.getObjectId().getName();
+    }
+
+    /** 所有本地分支 head。key=短名，value=commit hash */
+    public Map<String, String> getAllBranchHeads() throws IOException {
+        Map<String, String> result = new LinkedHashMap<>();
+        for (Ref ref : repository.getRefDatabase().getRefsByPrefix(Constants.R_HEADS)) {
+            ObjectId id = ref.getObjectId();
+            if (id != null) {
+                result.put(Repository.shortenRefName(ref.getName()), id.getName());
+            }
+        }
+        return result;
+    }
+
+    /** 探测默认分支名。优先级：origin/HEAD → main → master → 唯一本地分支 */
+    public @Nullable String getDefaultBranch() throws IOException {
+        Ref originHead = repository.exactRef("refs/remotes/origin/HEAD");
+        if (originHead != null && originHead.isSymbolic()) {
+            return Repository.shortenRefName(originHead.getTarget().getName())
+                    .replaceFirst("^origin/", "");
+        }
+        for (String candidate : new String[]{"main", "master"}) {
+            if (repository.exactRef(Constants.R_HEADS + candidate) != null) {
+                return candidate;
+            }
+        }
+        Map<String, String> locals = getAllBranchHeads();
+        return locals.size() == 1 ? locals.keySet().iterator().next() : null;
+    }
+
+    // ==================== diff ====================
+
+    /**
+     * 两个 ref/commit 之间的文件级快照对比。
+     */
+    public List<GitDiffEntry> getDiffBetweenCommits(String fromRef, String toRef)
+            throws IOException, IllegalArgumentException {
+        ObjectId fromId = repository.resolve(fromRef);
+        ObjectId toId = repository.resolve(toRef);
+        if (fromId == null || toId == null) {
+            throw new IllegalArgumentException(
+                    "Unresolvable ref: " + (fromId == null ? fromRef : toRef));
+        }
+        try (RevWalk walk = new RevWalk(repository)) {
+            RevCommit from = walk.parseCommit(fromId);
+            RevCommit to = walk.parseCommit(toId);
+            return diffTrees(from.getTree().getId(), to.getTree().getId());
+        }
+    }
+
+    // ==================== getCommitInfo ====================
+
+    /**
+     * 单个提交完整信息（含 diff）。
+     * <p>⚠️ merge commit 的 {@code diffEntries} 只相对 <b>first parent</b>。
+     */
+    public GitCommitInfo getCommitInfo(String ref) throws IOException, IllegalArgumentException {
+        ObjectId commitId = repository.resolve(ref);
+        if (commitId == null) {
+            throw new IllegalArgumentException("Unresolvable ref: " + ref);
+        }
+        try (RevWalk walk = new RevWalk(repository)) {
+            return buildCommitInfo(walk.parseCommit(commitId), walk);
         }
     }
 
     /**
-     * 获取单个提交的完整信息（含 diff），用于初始提交等场景
+     * 计算某提交相对其所有父提交的 diff。root 返回空 Map。
      */
-    public GitCommitInfo getCommitInfo(String hash) throws IOException, IllegalArgumentException {
-        ObjectId commitId = repository.resolve(hash);
+    public Map<String, List<GitDiffEntry>> getDiffsForAllParents(String ref)
+            throws IOException, IllegalArgumentException {
+        ObjectId commitId = repository.resolve(ref);
         if (commitId == null) {
-            throw new IllegalArgumentException("Invalid hash: " + hash);
+            throw new IllegalArgumentException("Unresolvable ref: " + ref);
         }
+        Map<String, List<GitDiffEntry>> result = new LinkedHashMap<>();
         try (RevWalk walk = new RevWalk(repository)) {
             RevCommit rev = walk.parseCommit(commitId);
-            return buildCommitInfo(rev);
-        }
-    }
+            if (rev.getParentCount() == 0) return result;
 
-    /**
-     * 获取两个提交之间的逐提交列表（不含 fromHash，用于增量分析）
-     */
-    public List<GitCommitInfo> getCommitsBetween(String fromHash, String toHash) throws IOException, IllegalArgumentException {
-        ObjectId fromId = repository.resolve(fromHash);
-        ObjectId toId = repository.resolve(toHash);
-
-        if (fromId == null || toId == null) {
-            throw new IllegalArgumentException("Invalid hash");
-        }
-
-        List<GitCommitInfo> commitInfos = new ArrayList<>();
-        try (RevWalk walk = new RevWalk(repository)) {
-            RevCommit fromCommit = walk.parseCommit(fromId);
-
-            walk.markStart(walk.parseCommit(toId));
-            walk.markUninteresting(fromCommit);
-
-            for (RevCommit rev : walk) {
-                commitInfos.add(buildCommitInfo(rev));
+            ObjectId currentTree = rev.getTree().getId();
+            for (RevCommit parent : rev.getParents()) {
+                RevCommit parsed = walk.parseCommit(parent.getId());
+                result.put(parsed.getId().getName(),
+                        diffTrees(parsed.getTree().getId(), currentTree));
             }
         }
-        return commitInfos;
+        return result;
     }
 
-    private GitCommitInfo buildCommitInfo(RevCommit rev) throws IOException {
+    // ==================== getCommitsBetween ====================
+
+    /**
+     * fromRef（不含）到 toRef（含）之间的逐提交列表。
+     * 要求 fromRef 是 toRef 的祖先，否则抛异常。
+     */
+    public List<GitCommitInfo> getCommitsBetween(String fromRef, String toRef)
+            throws IOException, IllegalArgumentException {
+        ObjectId fromId = repository.resolve(fromRef);
+        ObjectId toId = repository.resolve(toRef);
+        if (fromId == null || toId == null) {
+            throw new IllegalArgumentException(
+                    "Unresolvable ref: " + (fromId == null ? fromRef : toRef));
+        }
+
+        // 1) 祖先校验用独立的 RevWalk，避免污染后续遍历
+        try (RevWalk checkWalk = new RevWalk(repository)) {
+            RevCommit from = checkWalk.parseCommit(fromId);
+            RevCommit to = checkWalk.parseCommit(toId);
+            if (!checkWalk.isMergedInto(from, to)) {
+                throw new IllegalArgumentException(
+                        fromRef + " is not an ancestor of " + toRef);
+            }
+        }
+
+        // 2) 遍历用新的 RevWalk
+        List<GitCommitInfo> result = new ArrayList<>();
+        try (RevWalk walk = new RevWalk(repository)) {
+            RevCommit from = walk.parseCommit(fromId);
+            RevCommit to = walk.parseCommit(toId);
+            walk.markStart(to);
+            walk.markUninteresting(from);
+            for (RevCommit rev : walk) {
+                result.add(buildCommitInfo(rev, walk));
+            }
+        }
+        return result;
+    }
+
+    // ==================== 内部 ====================
+
+    private ObjectId resolveBranchOrHead(String branch) throws IOException {
+        if (branch == null || branch.isEmpty() || Constants.HEAD.equals(branch)) {
+            return repository.resolve(Constants.HEAD);
+        }
+        String fullRef = branch.startsWith(Constants.R_HEADS)
+                ? branch
+                : Constants.R_HEADS + branch;
+        Ref ref = repository.exactRef(fullRef);
+        return (ref == null) ? repository.resolve(branch) : ref.getObjectId();
+    }
+
+
+
+    private GitCommitInfo buildCommitInfo(RevCommit rev, RevWalk walk) throws IOException {
         GitCommitInfo info = new GitCommitInfo();
         info.setCommitHash(rev.getId().getName());
         info.setAuthorName(rev.getAuthorIdent().getName());
@@ -155,89 +327,118 @@ public class GitService implements AutoCloseable {
         info.setTimestamp(rev.getCommitTime());
         info.setFullMessage(rev.getFullMessage());
 
-        if (rev.getParentCount() > 0) {
-            ObjectId parentTree = rev.getParent(0).getTree().getId();
-            ObjectId currentTree = rev.getTree().getId();
-            info.setDiffEntries(getDiffBetweenTrees(parentTree, currentTree));
+        int parentCount = rev.getParentCount();
+        info.setParentCount(parentCount);
+        info.setMergeCommit(parentCount >= 2);
+
+        if (parentCount > 0) {
+            List<String> parentHashes = new ArrayList<>(parentCount);
+            for (RevCommit p : rev.getParents()) {
+                parentHashes.add(p.getId().getName());
+            }
+            info.setParentHashes(parentHashes);
+
+            RevCommit firstParent = walk.parseCommit(rev.getParent(0).getId());
+            info.setDiffBaseParentHash(firstParent.getId().getName());
+            info.setDiffEntries(diffTrees(
+                    firstParent.getTree().getId(),
+                    rev.getTree().getId()));
         } else {
+            info.setParentHashes(List.of());
+            info.setDiffBaseParentHash(null);
             info.setDiffEntries(getAllFilesAsAdd(rev.getTree().getId()));
         }
         return info;
     }
 
-    private List<GitDiffEntry> getDiffBetweenTrees(ObjectId fromTree, ObjectId toTree) throws IOException {
+    private List<GitDiffEntry> diffTrees(ObjectId fromTree, ObjectId toTree) throws IOException {
         try (DiffFormatter df = new DiffFormatter(DisabledOutputStream.INSTANCE)) {
             df.setRepository(repository);
             df.setDiffComparator(RawTextComparator.DEFAULT);
             df.setDetectRenames(true);
 
             List<DiffEntry> entries = df.scan(fromTree, toTree);
-            List<GitDiffEntry> result = new ArrayList<>();
+            List<GitDiffEntry> result = new ArrayList<>(entries.size());
             for (DiffEntry entry : entries) {
-                GitDiffEntry dto = new GitDiffEntry();
-                dto.setChangeOperation(mapChangeType(entry.getChangeType()));
-                dto.setOldPath(DiffEntry.DEV_NULL.equals(entry.getOldPath()) ? null : entry.getOldPath());
-                dto.setNewPath(DiffEntry.DEV_NULL.equals(entry.getNewPath()) ? null : entry.getNewPath());
-
-                if (entry.getChangeType() != DiffEntry.ChangeType.DELETE) {
-                    dto.setNewContent(readFileContent(toTree, entry.getNewPath()));
-                }
-                if (entry.getChangeType() != DiffEntry.ChangeType.ADD) {
-                    dto.setOldContent(readFileContent(fromTree, entry.getOldPath()));
-                }
-                result.add(dto);
+                result.add(toGitDiffEntry(entry, fromTree, toTree));
             }
             return result;
         }
     }
 
-    private @Nullable String getFileContent(String commitHash, String filePath) throws IOException {
-        ObjectId commitId = repository.resolve(commitHash);
-        try (RevWalk walk = new RevWalk(repository)) {
-            RevCommit commit = walk.parseCommit(commitId);
-            try (org.eclipse.jgit.treewalk.TreeWalk tw = org.eclipse.jgit.treewalk.TreeWalk.forPath(repository, filePath, commit.getTree())) {
-                if (tw == null) return null;
-                ObjectId blobId = tw.getObjectId(0);
-                ObjectLoader loader = repository.open(blobId);
-                return new String(loader.getBytes(), StandardCharsets.UTF_8);
-            }
+    private GitDiffEntry toGitDiffEntry(DiffEntry entry, ObjectId fromTree, ObjectId toTree)
+            throws IOException {
+        GitDiffEntry dto = new GitDiffEntry();
+        dto.setChangeOperation(mapChangeType(entry.getChangeType()));
+
+        boolean isAdd = entry.getChangeType() == DiffEntry.ChangeType.ADD;
+        boolean isDelete = entry.getChangeType() == DiffEntry.ChangeType.DELETE;
+
+        dto.setOldPath(isAdd ? null : entry.getOldPath());
+        dto.setNewPath(isDelete ? null : entry.getNewPath());
+
+        if (!isDelete && dto.getNewPath() != null) {
+            dto.setNewContent(readFileContent(toTree, dto.getNewPath()));
         }
+        if (!isAdd && dto.getOldPath() != null) {
+            dto.setOldContent(readFileContent(fromTree, dto.getOldPath()));
+        }
+        return dto;
     }
 
     private @Nullable String readFileContent(ObjectId treeId, String filePath) throws IOException {
-        try (org.eclipse.jgit.treewalk.TreeWalk tw = org.eclipse.jgit.treewalk.TreeWalk.forPath(repository, filePath, treeId)) {
+        if (filePath == null || DiffEntry.DEV_NULL.equals(filePath)) return null;
+
+        try (TreeWalk tw = TreeWalk.forPath(repository, filePath, treeId)) {
             if (tw == null) return null;
+
+            if (tw.getFileMode(0) == org.eclipse.jgit.lib.FileMode.GITLINK) {
+                return null;
+            }
             ObjectId blobId = tw.getObjectId(0);
             ObjectLoader loader = repository.open(blobId);
-            return new String(loader.getBytes(), StandardCharsets.UTF_8);
+
+            if (loader.getSize() > MAX_FILE_CONTENT_BYTES) return null;
+            byte[] bytes = loader.getBytes();
+            if (isBinary(bytes)) return null;
+            return new String(bytes, StandardCharsets.UTF_8);
         }
+    }
+
+    private static boolean isBinary(byte[] bytes) {
+        int len = Math.min(bytes.length, BINARY_SNIFF_LEN);
+        for (int i = 0; i < len; i++) {
+            if (bytes[i] == 0) return true;
+        }
+        return false;
     }
 
     private List<GitDiffEntry> getAllFilesAsAdd(ObjectId treeId) throws IOException {
         List<GitDiffEntry> result = new ArrayList<>();
-        try (org.eclipse.jgit.treewalk.TreeWalk tw = new org.eclipse.jgit.treewalk.TreeWalk(repository)) {
+        try (TreeWalk tw = new TreeWalk(repository)) {
             tw.addTree(treeId);
             tw.setRecursive(true);
             while (tw.next()) {
+                if (tw.getFileMode(0) == org.eclipse.jgit.lib.FileMode.GITLINK) continue;
+
                 GitDiffEntry dto = new GitDiffEntry();
                 dto.setChangeOperation(ChangeOperation.ADD);
                 dto.setOldPath(null);
                 dto.setNewPath(tw.getPathString());
                 dto.setOldContent(null);
-                ObjectId blobId = tw.getObjectId(0);
-                ObjectLoader loader = repository.open(blobId);
-                dto.setNewContent(new String(loader.getBytes(), StandardCharsets.UTF_8));
+                dto.setNewContent(readFileContent(treeId, tw.getPathString()));
                 result.add(dto);
             }
         }
         return result;
     }
 
-
     @Override
     public void close() {
-        if (repository != null) repository.close();
         if (git != null) git.close();
+        if (ownsRepository && repository != null) {
+            repository.close();
+        }
     }
 
     private ChangeOperation mapChangeType(DiffEntry.@NonNull ChangeType type) {

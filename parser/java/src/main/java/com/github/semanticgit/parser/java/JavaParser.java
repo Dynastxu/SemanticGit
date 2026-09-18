@@ -1,7 +1,9 @@
 package com.github.semanticgit.parser.java;
 
+import com.github.javaparser.ast.Node;
 import com.github.semanticgit.common.entity.*;
 import com.github.semanticgit.parser.java.api.AbstractParser;
+import com.github.semanticgit.parser.java.api.EntityChange;
 import com.github.semanticgit.parser.java.api.ParsingResult;
 import com.github.semanticgit.parser.java.api.SourceCode;
 import com.github.javaparser.*;
@@ -13,22 +15,14 @@ import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.NonNull;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 import java.util.concurrent.*;
+import java.util.stream.Collectors;
 
 @Slf4j
 @NoArgsConstructor
 public class JavaParser extends AbstractParser<JavaParserConfig> {
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
-    private static final ParsingResult OOM_FALLBACK = ParsingResult.builder()
-            .entities(Collections.emptyList())
-            .quality(DataQuality.FILE)
-            .qualityRemark("OUT_OF_MEMORY")
-            .parseDurationMs(0)
-            .build();
 
     public JavaParser(JavaParserConfig config) {
         super(config);
@@ -43,18 +37,6 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
             } catch (Exception e) {
                 log.error("Parse error for {}: {}", sourceCode.getFilePath(), e.getMessage());
                 return buildFallbackResult(DataQuality.FILE, "CRASHED: " + e.getClass().getSimpleName());
-            } catch (OutOfMemoryError e) {
-                System.gc();
-
-                // 短暂让出 CPU，给 GC 时间执行
-                try {
-                    Thread.sleep(100);
-                } catch (InterruptedException ignored) {
-                    Thread.currentThread().interrupt();
-                }
-
-                log.error("Out of memory when parsing {}: {}", sourceCode.getFilePath(), e.getMessage());
-                return OOM_FALLBACK;
             }
         });
 
@@ -181,18 +163,18 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
         // 提取方法签名（不关心方法体）
         // 匹配: public/private/protected 返回类型 方法名(参数)
         java.util.regex.Pattern methodPattern = java.util.regex.Pattern.compile(
-                "(?:public\\s+|private\\s+|protected\\s+)?(?:static\\s+)?(?:\\w+\\s+)+(\\w+)\\s*\\([^)]*\\)\\s*(?:throws\\s+\\w+)?\\s*\\{",
+                "(?:public\\s+|private\\s+|protected\\s+)?(?:static\\s+)?(?:\\w+\\s+)+(\\w+)\\s*\\(([^)]*)\\)\\s*(?:throws\\s+\\w+)?\\s*\\{",
                 java.util.regex.Pattern.MULTILINE
         );
         java.util.regex.Matcher methodMatcher = methodPattern.matcher(content);
         String packageName = extractPackageName(content);
         while (methodMatcher.find()) {
             String methodName = methodMatcher.group(1);
-            // 尝试从上下文中找到最近的外层类（简化处理）
+            String params = methodMatcher.group(2).replaceAll("\\s+", ""); // 去空白
             String parentClass = findParentClass(content, methodMatcher.start());
             String fullyQualifiedName = packageName.isEmpty()
-                    ? parentClass + "#" + methodName
-                    : packageName + "." + parentClass + "#" + methodName;
+                    ? parentClass + "#" + methodName + "(" + params + ")"
+                    : packageName + "." + parentClass + "#" + methodName + "(" + params + ")";
             entities.add(Entity.builder()
                     .name(fullyQualifiedName)
                     .kind(EntityKind.METHOD)
@@ -250,9 +232,11 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
                     ? className
                     : packageName + "." + className;
 
+            String classSig = buildClassSignature(cls);
             entities.add(Entity.builder()
                     .name(fullyQualifiedName)
                     .kind(EntityKind.CLASS)
+                    .signature(classSig)
                     .build());
 
             // 提取内部类（递归处理）
@@ -261,9 +245,11 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
                     .forEach(innerCls -> {
                         String innerName = innerCls.getNameAsString();
                         String innerFullyQualified = fullyQualifiedName + "$" + innerName;
+                        String innerSig = buildClassSignature(innerCls);
                         entities.add(Entity.builder()
                                 .name(innerFullyQualified)
                                 .kind(EntityKind.CLASS)
+                                .signature(innerSig)
                                 .build());
                     });
         });
@@ -278,17 +264,57 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
                         ? className
                         : packageName + "." + className;
 
-                String methodName = method.getNameAsString();
-                String fullyQualifiedName = parentFullName + "#" + methodName;
+                String params = method.getParameters().stream()
+                        .map(p -> p.getType().asString())
+                        .collect(Collectors.joining(","));
+                String fullyQualifiedName = parentFullName + "#" + method.getNameAsString() + "(" + params + ")";
 
+                String methodSig = buildMethodSignature(method);
                 entities.add(Entity.builder()
                         .name(fullyQualifiedName)
                         .kind(EntityKind.METHOD)
+                        .signature(methodSig)
                         .build());
             }
         });
 
         return entities;
+    }
+
+    /**
+     * 构建类的结构化签名: "SuperName:InterfaceList:fieldCount:methodSig1;methodSig2;..."
+     */
+    private @NonNull String buildClassSignature(@NonNull ClassOrInterfaceDeclaration cls) {
+        String superName = cls.getExtendedTypes().stream()
+                .map(Node::toString)
+                .findFirst()
+                .orElse("");
+        String interfaces = cls.getImplementedTypes().stream()
+                .map(Node::toString)
+                .sorted()
+                .collect(Collectors.joining(","));
+        int fieldCount = (int) cls.getFields().size();
+        String methodSigs = cls.getMethods().stream()
+                .map(m -> m.getNameAsString() + "(" + m.getParameters().stream()
+                        .map(p -> p.getType().asString())
+                        .collect(Collectors.joining(",")) + ")")
+                .sorted()
+                .collect(Collectors.joining(";"));
+        return superName + ":" + interfaces + ":" + fieldCount + ":" + methodSigs;
+    }
+
+    /**
+     * 构建方法的结构化签名: "ReturnType:Param1,Param2:bodyHash"
+     */
+    private @NonNull String buildMethodSignature(@NonNull MethodDeclaration method) {
+        String returnType = method.getType().asString();
+        String params = method.getParameters().stream()
+                .map(p -> p.getType().asString())
+                .collect(Collectors.joining(","));
+        String bodyHash = method.getBody()
+                .map(b -> Integer.toHexString(b.toString().hashCode()))
+                .orElse("0");
+        return returnType + ":" + params + ":" + bodyHash;
     }
 
     /**
@@ -304,171 +330,101 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
     }
 
     @Override
-    public int parseChangeNatureFlag(SourceCode sourceCodeBefore, SourceCode sourceCodeAfter, String entityName) {
-        int flags = 0;
+    public List<EntityChange> parseChangeNatureFlags(SourceCode sourceCodeBefore, SourceCode sourceCodeAfter) {
+        List<EntityChange> changes = new ArrayList<>();
 
-        // 1. 判断是否为测试文件（取前后中非 null 的一方）
+        Map<String, Entity> beforeEntities = sourceCodeBefore != null
+                ? parseEntityMap(sourceCodeBefore) : Collections.emptyMap();
+        Map<String, Entity> afterEntities = sourceCodeAfter != null
+                ? parseEntityMap(sourceCodeAfter) : Collections.emptyMap();
+
         SourceCode fileHint = sourceCodeAfter != null ? sourceCodeAfter : sourceCodeBefore;
-        if (isTestFile(fileHint)) {
-            flags |= ChangeNatureFlag.TEST.code;
+        int testFlag = isTestFile(fileHint) ? ChangeNatureFlag.TEST.code : 0;
+
+        Set<String> commonNames = new HashSet<>(beforeEntities.keySet());
+        commonNames.retainAll(afterEntities.keySet());
+        for (String name : commonNames) {
+            String beforeBody = extractEntityBody(sourceCodeBefore, name);
+            String afterBody = extractEntityBody(sourceCodeAfter, name);
+            int flags = parseEntityChangeNatureFlag(beforeBody, afterBody) | testFlag;
+            changes.add(EntityChange.builder()
+                    .before(beforeEntities.get(name))
+                    .after(afterEntities.get(name))
+                    .flags(flags)
+                    .build());
         }
 
-        // 2. 判断是否仅为样式变更（仅空白字符差异）
-        if (isStyleOnlyChange(sourceCodeBefore, sourceCodeAfter)) {
-            flags |= ChangeNatureFlag.STYLE.code;
+        Set<String> addedNames = new HashSet<>(afterEntities.keySet());
+        addedNames.removeAll(beforeEntities.keySet());
+        for (String name : addedNames) {
+            String afterBody = extractEntityBody(sourceCodeAfter, name);
+            int flags = parseEntityChangeNatureFlag(null, afterBody) | testFlag;
+            changes.add(EntityChange.builder()
+                    .before(null)
+                    .after(afterEntities.get(name))
+                    .flags(flags)
+                    .build());
         }
 
-        // 3. 判断是否仅为文档变更（仅注释差异）
-        if (isDocsOnlyChange(sourceCodeBefore, sourceCodeAfter)) {
-            flags |= ChangeNatureFlag.DOCS.code;
+        Set<String> removedNames = new HashSet<>(beforeEntities.keySet());
+        removedNames.removeAll(afterEntities.keySet());
+        for (String name : removedNames) {
+            String beforeBody = extractEntityBody(sourceCodeBefore, name);
+            int flags = parseEntityChangeNatureFlag(beforeBody, null) | testFlag;
+            changes.add(EntityChange.builder()
+                    .before(beforeEntities.get(name))
+                    .after(null)
+                    .flags(flags)
+                    .build());
         }
 
-        // 4. 实体级别分析：根据 entityName 定位具体类/方法，判断变更性质
-        if (entityName != null && !entityName.isEmpty()) {
-            int entityFlags = analyzeEntityChange(sourceCodeBefore, sourceCodeAfter, entityName);
-            flags |= entityFlags;
+        return changes;
+    }
+
+    @Override
+    public int parseEntityChangeNatureFlag(String sourceCodeBefore, String sourceCodeAfter) {
+        boolean beforeEmpty = sourceCodeBefore == null || sourceCodeBefore.trim().isEmpty();
+        boolean afterEmpty = sourceCodeAfter == null || sourceCodeAfter.trim().isEmpty();
+
+        if (beforeEmpty && afterEmpty) {
+            return 0;
         }
 
-        // 如果没有任何标志匹配，默认返回 FEAT
-        if (flags == 0) {
+        if (beforeEmpty) {
             return ChangeNatureFlag.FEAT.code;
         }
 
-        return flags;
-    }
+        if (afterEmpty) {
+            return ChangeNatureFlag.FEAT.code;
+        }
 
-    /**
-     * 分析指定实体的变更性质，返回实体级别的 flag 位掩码
-     */
-    private int analyzeEntityChange(SourceCode before, SourceCode after, String entityName) {
-        int flags = 0;
+        if (sourceCodeBefore.equals(sourceCodeAfter)) {
+            return 0;
+        }
 
-        boolean entityExistedBefore = entityExistsInSource(before, entityName);
-        boolean entityExistsAfter = entityExistsInSource(after, entityName);
+        String beforeNormalized = normalizeForComparison(sourceCodeBefore);
+        String afterNormalized = normalizeForComparison(sourceCodeAfter);
 
-        if (!entityExistedBefore && entityExistsAfter) {
-            // 新增实体 → FEAT
-            flags |= ChangeNatureFlag.FEAT.code;
-        } else if (entityExistedBefore && !entityExistsAfter) {
-            // 移除实体 → FEAT（也可能是重构的前半部分）
-            flags |= ChangeNatureFlag.FEAT.code;
-        } else if (entityExistedBefore && entityExistsAfter) {
-            // 实体在前后都存在，判断具体变更类型
-            String beforeBody = extractEntityBody(before, entityName);
-            String afterBody = extractEntityBody(after, entityName);
-
-            if (beforeBody != null && afterBody != null) {
-                // 去除空白和注释后比较
-                String beforeNormalized = normalizeForComparison(beforeBody);
-                String afterNormalized = normalizeForComparison(afterBody);
-
-                if (beforeNormalized.equals(afterNormalized)) {
-                    // 内容无实质变更，但实体在前后版本都存在
-                    // 可能是仅格式/注释变更，已在上面处理
-                } else {
-                    // 实体有实质变更
-                    String entitySimpleName = extractSimpleName(entityName);
-
-                    if (entitySimpleName != null && !entitySimpleName.equals(extractSimpleName(entityName))) {
-                        // 方法签名变更 → REFACTOR
-                        flags |= ChangeNatureFlag.REFACTOR.code;
-                    } else {
-                        // 方法体变更但签名不变 → 可能是 FIX 或 FEAT
-                        // 保守判断：如果方法体变小，可能是 FIX；变大，可能是 FEAT
-                        if (afterBody.length() < beforeBody.length() * 0.8) {
-                            flags |= ChangeNatureFlag.FIX.code;
-                        } else {
-                            flags |= ChangeNatureFlag.FEAT.code;
-                        }
-                    }
-                }
-            } else {
-                // 无法提取实体体，保守返回 FEAT
-                flags |= ChangeNatureFlag.FEAT.code;
+        if (beforeNormalized.equals(afterNormalized)) {
+            if (isDocsChangeStr(sourceCodeBefore, sourceCodeAfter)) {
+                return ChangeNatureFlag.DOCS.code;
             }
-        }
-
-        return flags;
-    }
-
-    /**
-     * 判断实体是否存在于源码中
-     */
-    private boolean entityExistsInSource(SourceCode sourceCode, String entityName) {
-        if (sourceCode == null || sourceCode.getContent() == null || entityName == null) {
-            return false;
-        }
-        // 实体名格式：com.example.Class 或 com.example.Class#method
-        String simpleName = extractSimpleName(entityName);
-        return simpleName != null && sourceCode.getContent().contains(simpleName);
-    }
-
-    /**
-     * 从全限定名中提取简名
-     */
-    private String extractSimpleName(String fullyQualifiedName) {
-        if (fullyQualifiedName == null) {
-            return null;
-        }
-        // 处理方法：com.example.Class#method → method
-        int hashIdx = fullyQualifiedName.indexOf('#');
-        if (hashIdx >= 0) {
-            return fullyQualifiedName.substring(hashIdx + 1);
-        }
-        // 处理类：com.example.Class → Class
-        int dotIdx = fullyQualifiedName.lastIndexOf('.');
-        if (dotIdx >= 0) {
-            return fullyQualifiedName.substring(dotIdx + 1);
-        }
-        return fullyQualifiedName;
-    }
-
-    /**
-     * 从源码中提取指定实体的方法体/类体
-     */
-    private String extractEntityBody(SourceCode sourceCode, String entityName) {
-        if (sourceCode == null || sourceCode.getContent() == null) {
-            return null;
-        }
-        String content = sourceCode.getContent();
-        String simpleName = extractSimpleName(entityName);
-        if (simpleName == null) {
-            return null;
-        }
-
-        // 尝试用 AST 解析并提取实体体
-        try {
-            if (sourceCode.getSizeInBytes() <= config.getMaxParseSizeBytes()) {
-                ParseResult<CompilationUnit> parseResult = parseWithAST(content);
-                if (parseResult.isSuccessful() && parseResult.getResult().isPresent()) {
-                    CompilationUnit cu = parseResult.getResult().get();
-                    // 查找方法
-                    for (MethodDeclaration method : cu.findAll(MethodDeclaration.class)) {
-                        if (method.getNameAsString().equals(simpleName)) {
-                            return method.getBody()
-                                    .map(body -> body.toString())
-                                    .orElse(method.toString());
-                        }
-                    }
-                    // 查找类
-                    for (ClassOrInterfaceDeclaration cls : cu.findAll(ClassOrInterfaceDeclaration.class)) {
-                        if (cls.getNameAsString().equals(simpleName)) {
-                            return cls.toString();
-                        }
-                    }
-                }
+            if (isStyleChangeStr(sourceCodeBefore, sourceCodeAfter)) {
+                return ChangeNatureFlag.STYLE.code;
             }
-        } catch (Exception e) {
-            log.debug("AST extraction failed for entity {}: {}", entityName, e.getMessage());
+            return 0;
         }
 
-        return null;
+        if (sourceCodeAfter.length() < sourceCodeBefore.length() * 0.8) {
+            return ChangeNatureFlag.FIX.code;
+        }
+        return ChangeNatureFlag.FEAT.code;
     }
 
     /**
      * 规范化代码用于比较：去除空白和注释
      */
-    private String normalizeForComparison(String code) {
+    private @NonNull String normalizeForComparison(String code) {
         if (code == null) {
             return "";
         }
@@ -477,44 +433,124 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
                 .replaceAll("\\s+", "");
     }
 
-    /**
-     * 判断是否为测试文件
-     */
-    private boolean isTestFile(SourceCode sourceCode) {
-        if (sourceCode == null) {
-            return false;
+    private Map<String, Entity> parseEntityMap(SourceCode sourceCode) {
+        if (sourceCode == null || sourceCode.getContent() == null) {
+            return Collections.emptyMap();
         }
-        String filePath = sourceCode.getFilePath();
-        return filePath != null && (
-            filePath.contains("/test/") ||
-            filePath.contains("\\test\\") ||
-            filePath.endsWith("Test.java") ||
-            filePath.endsWith("Tests.java")
-        );
+        ParsingResult result = parseEntities(sourceCode);
+        return result.getEntities().stream()
+                .collect(java.util.stream.Collectors.toMap(Entity::getName, e -> e, (a, _) -> a));
     }
 
-    /**
-     * 判断是否仅为样式变更（去除空白后内容相同）
-     */
-    private boolean isStyleOnlyChange(SourceCode before, SourceCode after) {
+    private boolean isDocsChangeStr(String before, String after) {
         if (before == null || after == null) {
             return false;
         }
-        String beforeNormalized = before.getContent().replaceAll("\\s+", "");
-        String afterNormalized = after.getContent().replaceAll("\\s+", "");
+        String beforeCode = before
+                .replaceAll("//[^\n]*\n?", "\n")
+                .replaceAll("/\\*[^*]*\\*+(?:[^/*][^*]*\\*+)*/", "")
+                .replaceAll("\\s+", " ")
+                .trim();
+        String afterCode = after
+                .replaceAll("//[^\n]*\n?", "\n")
+                .replaceAll("/\\*[^*]*\\*+(?:[^/*][^*]*\\*+)*/", "")
+                .replaceAll("\\s+", " ")
+                .trim();
+        return beforeCode.equals(afterCode);
+    }
+
+    private boolean isStyleChangeStr(String before, String after) {
+        if (before == null || after == null) {
+            return false;
+        }
+        String beforeNormalized = before.replaceAll("\\s+", "");
+        String afterNormalized = after.replaceAll("\\s+", "");
         return beforeNormalized.equals(afterNormalized);
     }
 
     /**
-     * 判断是否仅为文档变更（去除注释后内容相同）
+     * 判断是否为测试文件
      */
-    private boolean isDocsOnlyChange(SourceCode before, SourceCode after) {
-        if (before == null || after == null) {
+    private boolean isTestFile(SourceCode sourceCode) {
+        if (sourceCode == null || sourceCode.getFilePath() == null) {
             return false;
         }
-        // 移除单行和多行注释后比较
-        String beforeCode = before.getContent().replaceAll("//.*", "").replaceAll("/\\*.*?\\*/", "");
-        String afterCode = after.getContent().replaceAll("//.*", "").replaceAll("/\\*.*?\\*/", "");
-        return beforeCode.equals(afterCode);
+        String filePath = sourceCode.getFilePath();
+        return filePath.contains("/test/")
+                || filePath.contains("\\test\\")
+                || filePath.endsWith("Test.java")
+                || filePath.endsWith("Tests.java");
+    }
+
+    /**
+     * 从源码中提取指定实体的方法体/类体
+     */
+    private String extractEntityBody(SourceCode sourceCode, String entityName) {
+        if (sourceCode == null || sourceCode.getContent() == null || entityName == null) {
+            return null;
+        }
+        String content = sourceCode.getContent();
+
+        try {
+            if (sourceCode.getSizeInBytes() <= config.getMaxParseSizeBytes()) {
+                ParseResult<CompilationUnit> parseResult = parseWithAST(content);
+                if (parseResult.isSuccessful() && parseResult.getResult().isPresent()) {
+                    CompilationUnit cu = parseResult.getResult().get();
+                    String packageName = cu.getPackageDeclaration()
+                            .map(NodeWithName::getNameAsString)
+                            .orElse("");
+
+                    for (ClassOrInterfaceDeclaration cls : cu.findAll(ClassOrInterfaceDeclaration.class)) {
+                        String className = cls.getNameAsString();
+                        String parentFullName = packageName.isEmpty() ? className : packageName + "." + className;
+
+                        if (parentFullName.equals(entityName)) {
+                            return extractRange(content, cls);
+                        }
+
+                        for (MethodDeclaration method : cls.getMethods()) {
+                            String params = method.getParameters().stream()
+                                    .map(p -> p.getType().asString())
+                                    .collect(Collectors.joining(","));
+                            String methodFullName = parentFullName + "#" + method.getNameAsString() + "(" + params + ")";
+
+                            if (methodFullName.equals(entityName)) {
+                                return extractRange(content, method);
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.debug("AST extraction failed for entity {}: {}", entityName, e.getMessage());
+        }
+        return null;
+    }
+
+    private String extractRange(String content, @NonNull Node node) {
+        return node.getRange()
+                .map(r -> {
+                    int start = posToOffset(content, r.begin.line, r.begin.column);
+                    int end = posToOffset(content, r.end.line, r.end.column);
+                    return content.substring(start, end);
+                })
+                .orElse(node.toString());
+    }
+
+    private int posToOffset(@NonNull String content, int line, int column) {
+        int currentLine = 1;
+        int currentCol = 1;
+        for (int i = 0; i < content.length(); i++) {
+            if (currentLine == line && currentCol == column) {
+                return i;
+            }
+            if (content.charAt(i) == '\n') {
+                currentLine++;
+                currentCol = 1;
+            } else {
+                currentCol++;
+            }
+        }
+        return content.length();
     }
 }

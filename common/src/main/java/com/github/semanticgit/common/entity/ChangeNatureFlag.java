@@ -30,7 +30,7 @@ public enum ChangeNatureFlag {
         return result;
     }
 
-    public static int toCode(@NonNull EnumSet<ChangeNatureFlag> flags) {
+    public static int codeOf(@NonNull EnumSet<ChangeNatureFlag> flags) {
         int result = 0;
         for (ChangeNatureFlag flag : flags) {
             result |= flag.code;

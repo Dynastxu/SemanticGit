@@ -18,7 +18,7 @@ public class ChangeLog {
     /**
      * 变更性质标志位掩码，支持多标志组合（如 REFACTOR | DOCS）
      *
-     * @see ChangeNatureFlag#toCode(java.util.EnumSet)
+     * @see ChangeNatureFlag#codeOf(java.util.EnumSet)
      * @see ChangeNatureFlag#fromCode(int)
      */
     private int natureFlagCode;

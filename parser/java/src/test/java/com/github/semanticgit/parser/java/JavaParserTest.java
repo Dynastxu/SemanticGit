@@ -4,13 +4,11 @@ import com.github.semanticgit.parser.java.api.ParsingResult;
 import com.github.semanticgit.parser.java.api.SourceCode;
 import com.github.javaparser.ParseResult;
 import com.github.javaparser.ast.CompilationUnit;
-import com.github.semanticgit.common.entity.ChangeNatureFlag;
 import com.github.semanticgit.common.entity.DataQuality;
 import com.github.semanticgit.common.entity.Entity;
 import com.github.semanticgit.common.entity.EntityKind;
 import com.github.semanticgit.common.entity.EntityLanguage;
 
-import java.util.EnumSet;
 import org.junit.jupiter.api.*;
 
 import java.util.List;
@@ -132,8 +130,8 @@ class JavaParserTest {
                 .filter(e -> e.getKind() == EntityKind.METHOD)
                 .toList();
         assertEquals(2, methods.size());
-        assertTrue(methods.stream().anyMatch(m -> m.getName().equals("com.example.HelloWorld#sayHello")));
-        assertTrue(methods.stream().anyMatch(m -> m.getName().equals("com.example.HelloWorld#getName")));
+        assertTrue(methods.stream().anyMatch(m -> m.getName().equals("com.example.HelloWorld#sayHello()")));
+        assertTrue(methods.stream().anyMatch(m -> m.getName().equals("com.example.HelloWorld#getName()")));
     }
 
     @Test
@@ -177,7 +175,7 @@ class JavaParserTest {
                 .filter(e -> e.getKind() == EntityKind.METHOD)
                 .toList();
         assertTrue(methods.size() >= 2, "至少应有 outerMethod 和 innerMethod");
-        assertTrue(methods.stream().anyMatch(m -> m.getName().equals("com.example.Outer#outerMethod")));
+        assertTrue(methods.stream().anyMatch(m -> m.getName().equals("com.example.Outer#outerMethod()")));
     }
 
     @Test
@@ -367,7 +365,7 @@ class JavaParserTest {
         Entity methodEntity = result.getEntities().stream()
                 .filter(e -> e.getKind() == EntityKind.METHOD)
                 .findFirst().orElseThrow();
-        assertEquals("DefaultPackageClass#doSomething", methodEntity.getName());
+        assertEquals("DefaultPackageClass#doSomething()", methodEntity.getName());
     }
 
     @Test
@@ -404,8 +402,8 @@ class JavaParserTest {
                 .filter(e -> e.getKind() == EntityKind.METHOD)
                 .toList();
         assertEquals(2, methods.size());
-        assertTrue(methods.stream().anyMatch(m -> m.getName().equals("com.example.GenericBox#getValue")));
-        assertTrue(methods.stream().anyMatch(m -> m.getName().equals("com.example.GenericBox#transform")));
+        assertTrue(methods.stream().anyMatch(m -> m.getName().equals("com.example.GenericBox#getValue()")));
+        assertTrue(methods.stream().anyMatch(m -> m.getName().equals("com.example.GenericBox#transform(U)")));
     }
 
     @Test
@@ -499,81 +497,5 @@ class JavaParserTest {
         assertNotNull(result);
         Assertions.assertEquals(DataQuality.FILE, result.getQuality());
         Assertions.assertTrue(result.getQualityRemark().contains("OUT_OF_MEMORY"));
-    }
-
-    @Test
-    @DisplayName("parseChangeNatureFlag 测试文件应返回 TEST 标志")
-    void testParseChangeNatureFlagTestFile() {
-        SourceCode code = SourceCode.builder()
-                .filePath("src/test/java/com/example/MyTest.java")
-                .content("public class MyTest {}")
-                .language(EntityLanguage.JAVA)
-                .build();
-
-        int flags = parser.parseChangeNatureFlag(code, code, null);
-
-        EnumSet<ChangeNatureFlag> result = ChangeNatureFlag.fromCode(flags);
-        assertTrue(result.contains(ChangeNatureFlag.TEST));
-    }
-
-    @Test
-    @DisplayName("parseChangeNatureFlag 仅空白变更应返回 STYLE 标志")
-    void testParseChangeNatureFlagStyleOnly() {
-        SourceCode before = SourceCode.builder()
-                .filePath("src/main/java/com/example/Foo.java")
-                .content("public class Foo {\n    public void bar() {}\n}")
-                .language(EntityLanguage.JAVA)
-                .build();
-        SourceCode after = SourceCode.builder()
-                .filePath("src/main/java/com/example/Foo.java")
-                .content("public class Foo {\n\n    public void bar() {}\n\n}")
-                .language(EntityLanguage.JAVA)
-                .build();
-
-        int flags = parser.parseChangeNatureFlag(before, after, null);
-
-        EnumSet<ChangeNatureFlag> result = ChangeNatureFlag.fromCode(flags);
-        assertTrue(result.contains(ChangeNatureFlag.STYLE));
-    }
-
-    @Test
-    @DisplayName("parseChangeNatureFlag 仅注释变更应返回 DOCS 标志")
-    void testParseChangeNatureFlagDocsOnly() {
-        SourceCode before = SourceCode.builder()
-                .filePath("src/main/java/com/example/Foo.java")
-                .content("public class Foo {\n    // old comment\n    public void bar() {}\n}")
-                .language(EntityLanguage.JAVA)
-                .build();
-        SourceCode after = SourceCode.builder()
-                .filePath("src/main/java/com/example/Foo.java")
-                .content("public class Foo {\n    // new comment\n    public void bar() {}\n}")
-                .language(EntityLanguage.JAVA)
-                .build();
-
-        int flags = parser.parseChangeNatureFlag(before, after, null);
-
-        EnumSet<ChangeNatureFlag> result = ChangeNatureFlag.fromCode(flags);
-        assertTrue(result.contains(ChangeNatureFlag.DOCS));
-    }
-
-    @Test
-    @DisplayName("parseChangeNatureFlag 无特殊标志应默认返回 FEAT")
-    void testParseChangeNatureFlagDefaultFeat() {
-        SourceCode before = SourceCode.builder()
-                .filePath("src/main/java/com/example/Foo.java")
-                .content("public class Foo {\n    public void bar() {}\n}")
-                .language(EntityLanguage.JAVA)
-                .build();
-        SourceCode after = SourceCode.builder()
-                .filePath("src/main/java/com/example/Foo.java")
-                .content("public class Foo {\n    public void bar() { System.out.println(\"hi\"); }\n}")
-                .language(EntityLanguage.JAVA)
-                .build();
-
-        int flags = parser.parseChangeNatureFlag(before, after, null);
-
-        EnumSet<ChangeNatureFlag> result = ChangeNatureFlag.fromCode(flags);
-        assertEquals(1, result.size());
-        assertTrue(result.contains(ChangeNatureFlag.FEAT));
     }
 }

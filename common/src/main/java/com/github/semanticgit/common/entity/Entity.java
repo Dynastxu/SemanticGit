@@ -22,15 +22,16 @@ public class Entity {
     private EntityLanguage language;
     private EntityKind kind;
     /**
-     * 简化名称（仅用于UI展示，不存数据库）
-     * <p>
-     * 例如：全限定名 "com.example.Service#process" 的简名是 "process"
-     */
-    private String simpleName;
-    /**
      * 所属的父实体ID（仅用于内存中的层级构建，非持久化字段）
      * <p>
      * 例如：方法所属的类ID
      */
     private Entity parent;
+    /**
+     * 结构化签名，用于跨文件重构匹配。
+     * <p>
+     * CLASS:  "SuperName:Interface1,Interface2:fieldCount:methodSig1;methodSig2"<p>
+     * METHOD: "ReturnType:Param1,Param2:bodyHash"
+     */
+    private String signature;
 }
