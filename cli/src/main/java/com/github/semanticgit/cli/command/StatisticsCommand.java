@@ -10,7 +10,8 @@ import java.nio.file.Path;
         mixinStandardHelpOptions = true,
         subcommands = {
                 OverviewCommand.class,
-                CommitCommand.class
+                CommitCommand.class,
+                EntityCommand.class
         }
 )
 public class StatisticsCommand implements Runnable {

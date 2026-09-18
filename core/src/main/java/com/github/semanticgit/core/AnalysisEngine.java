@@ -3,8 +3,10 @@ package com.github.semanticgit.core;
 import com.github.semanticgit.common.entity.*;
 import com.github.semanticgit.core.dao.ChangeLogDao;
 import com.github.semanticgit.core.dao.CommitMetaDao;
+import com.github.semanticgit.core.dao.RefDao;
 import com.github.semanticgit.core.dao.impl.ChangeLogDaoImpl;
 import com.github.semanticgit.core.dao.impl.CommitMetaDaoImpl;
+import com.github.semanticgit.core.dao.impl.RefDaoImpl;
 import com.github.semanticgit.core.db.DatabaseManager;
 import com.github.semanticgit.core.parser.ParserRegistry;
 import com.github.semanticgit.git.dto.GitCommitInfo;
@@ -23,6 +25,8 @@ import java.util.concurrent.CompletionException;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+
+import org.eclipse.jgit.lib.Constants;
 
 @Slf4j
 public class AnalysisEngine extends AbstractAnalysisEngine {
@@ -65,7 +69,11 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
             log.info("Fetched {} commits from repository", commits.size());
 
             CommitMetaDao commitMetaDao = new CommitMetaDaoImpl(dbManager);
-            commitMetaDao.saveAll(commits);
+            List<CommitMeta> oldestFirst = new ArrayList<>(commits);
+            Collections.reverse(oldestFirst);
+            commitMetaDao.saveAll(oldestFirst);
+
+            saveRefs(gitService, dbManager, commitMetaDao);
 
             if (commits.isEmpty()) {
                 return;
@@ -280,6 +288,25 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
             return 0.5;
         }
         return (double) intersection.size() / union.size();
+    }
+
+    private void saveRefs(GitService gitService, DatabaseManager dbManager,
+                           CommitMetaDao commitMetaDao) throws Exception {
+        RefDao refDao = new RefDaoImpl(dbManager);
+        Map<String, String> branchHeads = gitService.getAllBranchHeads();
+        List<References> refs = new ArrayList<>();
+        for (Map.Entry<String, String> entry : branchHeads.entrySet()) {
+            CommitMeta headMeta = commitMetaDao.findByHash(entry.getValue());
+            if (headMeta != null && headMeta.getId() != null) {
+                refs.add(References.builder()
+                        .name(Constants.R_HEADS + entry.getKey())
+                        .type(ReferenceType.BRANCH)
+                        .commitId(headMeta.getId())
+                        .build());
+            }
+        }
+        refDao.saveAll(refs);
+        log.info("Saved {} branch refs", refs.size());
     }
 
     private SourceCode buildSourceCode(String filePath, String content, EntityLanguage language) {

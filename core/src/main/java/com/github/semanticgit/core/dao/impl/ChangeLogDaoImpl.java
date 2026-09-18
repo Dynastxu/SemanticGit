@@ -187,16 +187,21 @@ public class ChangeLogDaoImpl implements ChangeLogDao {
                 return EntityChangeHistory.builder().changes(changes).build();
             }
 
+            debugEntityInfo(entityName);
+
+            debugCommitParentStats();
+            debugChainCount(entityName, headCommitId);
+
             String sql = """
                         WITH RECURSIVE commit_chain AS (
-                            SELECT cm.id, cm.hash, cm.timestamp, cm.message,
+                            SELECT cm.id, cm.parent_commit_id, cm.hash, cm.timestamp, cm.message,
                                    a.name AS author_name, a.email AS author_email,
                                    0 AS depth
                             FROM commit_meta cm
                             JOIN author a ON cm.author_id = a.id
                             WHERE cm.id = ?
                             UNION ALL
-                            SELECT cm.id, cm.hash, cm.timestamp, cm.message,
+                            SELECT cm.id, cm.parent_commit_id, cm.hash, cm.timestamp, cm.message,
                                    a.name AS author_name, a.email AS author_email,
                                    cc.depth + 1
                             FROM commit_meta cm
@@ -243,6 +248,68 @@ public class ChangeLogDaoImpl implements ChangeLogDao {
             log.error("Failed to query entity change history for entity={} ref={}", entityName, refName, e);
         }
         return EntityChangeHistory.builder().changes(changes).build();
+    }
+
+    private void debugChainCount(String entityName, Long headCommitId) {
+        String sql = """
+                WITH RECURSIVE commit_chain AS (
+                    SELECT cm.id, cm.parent_commit_id, cm.hash, 0 AS depth
+                    FROM commit_meta cm
+                    WHERE cm.id = ?
+                    UNION ALL
+                    SELECT cm.id, cm.parent_commit_id, cm.hash, cc.depth + 1
+                    FROM commit_meta cm
+                    JOIN commit_chain cc ON cm.id = cc.parent_commit_id
+                )
+                SELECT COUNT(*) FROM commit_chain
+                """;
+        try (PreparedStatement ps = dbManager.getConnection().prepareStatement(sql)) {
+            ps.setLong(1, headCommitId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    log.debug("commit_chain: {} commits reachable from headCommitId={}", rs.getInt(1), headCommitId);
+                }
+            }
+        } catch (SQLException e) {
+            log.debug("Chain count query failed", e);
+        }
+    }
+
+    private void debugCommitParentStats() {
+        try (Statement stmt = dbManager.getConnection().createStatement()) {
+            ResultSet rs = stmt.executeQuery(
+                "SELECT COUNT(*) AS total, SUM(CASE WHEN parent_commit_id IS NOT NULL THEN 1 ELSE 0 END) AS with_parent FROM commit_meta");
+            if (rs.next()) {
+                log.debug("commit_meta: {} total, {} have parent_commit_id", rs.getInt("total"), rs.getInt("with_parent"));
+            }
+        } catch (SQLException e) {
+            log.debug("Parent stats query failed", e);
+        }
+    }
+
+    private void debugEntityInfo(String entityName) {
+        try {
+            String countSql = "SELECT COUNT(*) FROM entity WHERE name = ?";
+            try (PreparedStatement ps = dbManager.getConnection().prepareStatement(countSql)) {
+                ps.setString(1, entityName);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        log.debug("entity table: {} rows matching '{}'", rs.getInt(1), entityName);
+                    }
+                }
+            }
+            String clSql = "SELECT COUNT(*) FROM change_log cl JOIN entity e ON cl.entity_id = e.id WHERE e.name = ?";
+            try (PreparedStatement ps = dbManager.getConnection().prepareStatement(clSql)) {
+                ps.setString(1, entityName);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        log.debug("change_log table: {} rows matching '{}'", rs.getInt(1), entityName);
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            log.debug("Debug query failed", e);
+        }
     }
 
     private Long resolveRefCommitId(String refName) throws SQLException {
