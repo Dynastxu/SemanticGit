@@ -17,7 +17,14 @@ public class StatisticsCommand implements Runnable {
             index = "0",
             descriptionKey = "stat.dbFilePath"
     )
-    Path dbFilePath;
+    Path targetPath;
+
+    @CommandLine.Option(
+            names = {"-d", "--db-dir"},
+            descriptionKey = "analyze.dbDir",
+            defaultValue = "${user.home}/.semanticgit/db"
+    )
+    Path dbDir;
 
     @Override
     public void run() {

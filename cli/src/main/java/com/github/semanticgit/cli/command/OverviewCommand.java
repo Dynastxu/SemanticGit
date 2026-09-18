@@ -7,6 +7,7 @@ import com.github.semanticgit.core.db.DatabaseManager;
 import com.github.semanticgit.core.dto.SimpleEntityChangeStatistics;
 import picocli.CommandLine;
 
+import java.nio.file.Path;
 import java.util.Map;
 
 @CommandLine.Command(
@@ -19,12 +20,17 @@ public class OverviewCommand implements Runnable {
 
     @Override
     public void run() {
-        if (!parent.dbFilePath.toFile().exists()) {
-            System.err.println("Database file not found: " + parent.dbFilePath);
+        Path targetPath = parent.targetPath;
+        if (targetPath.toFile().isDirectory()) {
+            String dbName = Integer.toHexString(targetPath.toAbsolutePath().hashCode());
+            targetPath = parent.dbDir.resolve(dbName + ".db");
+        }
+        if (!targetPath.toFile().exists()) {
+            System.err.println("Database file not found: " + targetPath);
             return;
         }
 
-        try (DatabaseManager dbManager = new DatabaseManager(parent.dbFilePath.toFile())) {
+        try (DatabaseManager dbManager = new DatabaseManager(targetPath.toFile())) {
             StatisticsProvider provider = new StatisticsProvider(dbManager);
             SimpleEntityChangeStatistics stats = provider.getSimpleEntityChangeStatistics();
 
@@ -34,7 +40,7 @@ public class OverviewCommand implements Runnable {
             }
 
             System.out.println("=== Repository Overview ===");
-            System.out.println("Database:    " + parent.dbFilePath);
+            System.out.println("Database:    " + targetPath);
             System.out.println("Total commits:  " + stats.getTotalCommits());
             System.out.println();
 
