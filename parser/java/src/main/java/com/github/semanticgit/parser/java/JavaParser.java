@@ -1,16 +1,18 @@
 package com.github.semanticgit.parser.java;
 
-import com.github.javaparser.ast.Node;
-import com.github.semanticgit.common.entity.*;
-import com.github.semanticgit.parser.java.api.AbstractParser;
-import com.github.semanticgit.parser.java.api.EntityChange;
-import com.github.semanticgit.parser.java.api.ParsingResult;
-import com.github.semanticgit.parser.java.api.SourceCode;
 import com.github.javaparser.*;
 import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.Node;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.nodeTypes.NodeWithName;
+import com.github.semanticgit.common.config.ConfigItem;
+import com.github.semanticgit.common.entity.*;
+import com.github.semanticgit.parser.java.api.EntityChange;
+import com.github.semanticgit.parser.java.api.ParsingResult;
+import com.github.semanticgit.parser.java.api.AbstractParser;
+import com.github.semanticgit.parser.java.api.LanguageParser;
+import com.github.semanticgit.parser.java.api.SourceCode;
 import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.NonNull;
@@ -21,17 +23,20 @@ import java.util.stream.Collectors;
 
 @Slf4j
 @NoArgsConstructor
-@Deprecated(forRemoval = true)
-public class JavaParser extends AbstractParser<JavaParserConfig> {
+public class JavaParser extends AbstractParser {
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
-    public JavaParser(JavaParserConfig config) {
-        super(config);
+    public JavaParser(Map<String, ConfigItem<?>> configMap) {
+        super(configMap);
+    }
+
+    @Override
+    public void registerConfigs(Map<String, ConfigItem<?>> configMap) {
+        LanguageParser.registerCommonConfigs(configMap);
     }
 
     @Override
     public ParsingResult parseEntities(@NonNull SourceCode sourceCode) {
-        // 使用超时机制，防止解析卡死
         Future<ParsingResult> future = executor.submit(() -> {
             try {
                 return doParse(sourceCode);
@@ -42,10 +47,10 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
         });
 
         try {
-            return future.get(config.getTimeoutMs(), TimeUnit.MILLISECONDS);
+            return future.get(getTimeoutMs(), TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
             future.cancel(true);
-            log.warn("Parse timeout for {}: {}ms", sourceCode.getFilePath(), config.getTimeoutMs());
+            log.warn("Parse timeout for {}: {}ms", sourceCode.getFilePath(), getTimeoutMs());
             return buildFallbackResult(DataQuality.FILE, "TIMEOUT");
         } catch (Exception e) {
             log.error("Unexpected parse error for {}: {}", sourceCode.getFilePath(), e.getMessage());
@@ -58,27 +63,22 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
         return EntityLanguage.JAVA;
     }
 
-    /**
-     * 核心解析逻辑（三级容错）
-     */
     private ParsingResult doParse(@NonNull SourceCode sourceCode) {
         long startTime = System.currentTimeMillis();
         String content = sourceCode.getContent();
         String remark = "NO_ENTITIES_FOUND";
 
-        // 空文件直接返回文件级结果
         if (content == null || content.trim().isEmpty()) {
             return buildFallbackResult(DataQuality.FILE, "EMPTY_FILE");
         }
 
         long sizeInBytes = sourceCode.getSizeInBytes();
         ParseResult<CompilationUnit> parseResult = null;
-        if (sizeInBytes > config.getMaxParseSizeBytes()) {
+        if (sizeInBytes > getMaxParseSizeBytes()) {
             log.warn("File too large for AST parsing ({} bytes): {}, falling back to regex",
                     sizeInBytes, sourceCode.getFilePath());
             remark = "AST_TOO_LARGE";
         } else {
-            // Level 1: 尝试 AST 完美解析
             parseResult = parseWithAST(content);
 
             if (parseResult.isSuccessful() && parseResult.getResult().isPresent()) {
@@ -86,7 +86,6 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
                 List<Entity> entities = extractEntities(cu);
 
                 if (!entities.isEmpty()) {
-                    // 完美解析成功
                     return ParsingResult.builder()
                             .entities(entities)
                             .quality(DataQuality.AST)
@@ -94,7 +93,6 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
                             .parseDurationMs(System.currentTimeMillis() - startTime)
                             .build();
                 } else {
-                    // AST 解析成功但未提取到实体（可能是纯接口或空类）
                     return buildFallbackResult(DataQuality.REGEX, "AST_NO_ENTITIES");
                 }
             }
@@ -104,12 +102,11 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
             remark = "REGEX_FALLBACK" + (parseResult.getProblems().isEmpty() ? "" : ": " + parseResult.getProblems().getFirst().getMessage());
         }
 
-        if (sizeInBytes > config.getMaxRegexSizeBytes()) {
+        if (sizeInBytes > getMaxRegexSizeBytes()) {
             log.warn("File too large for regex parsing ({} bytes): {}, falling back to file",
                     sizeInBytes, sourceCode.getFilePath());
             remark = "REGEX_TOO_LARGE";
         } else {
-            // Level 2: 正则回退（AST 部分失败）
             List<Entity> regexEntities = extractWithRegex(content);
             if (!regexEntities.isEmpty()) {
                 return ParsingResult.builder()
@@ -121,31 +118,21 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
             }
         }
 
-        // Level 3: 文件级兜底
         return buildFallbackResult(DataQuality.FILE, remark);
     }
 
-    /**
-     * 使用 {@link com.github.javaparser.JavaParser} 进行 AST 解析
-     */
     protected ParseResult<CompilationUnit> parseWithAST(String content) {
         ParserConfiguration parserConfig = new ParserConfiguration();
-        parserConfig.setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17); // 可配置化
-        parserConfig.setStoreTokens(true); // 便于调试
+        parserConfig.setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17);
+        parserConfig.setStoreTokens(true);
 
         com.github.javaparser.JavaParser parser = new com.github.javaparser.JavaParser(parserConfig);
         return parser.parse(ParseStart.COMPILATION_UNIT, new StringProvider(content));
     }
 
-    /**
-     * 正则表达式提取（降级方案）
-     * 仅提取类名和方法签名，不关心方法体是否正确
-     */
     private @NonNull List<Entity> extractWithRegex(String content) {
         List<Entity> entities = new ArrayList<>();
 
-        // 提取类名（包括内部类）
-        // 匹配: public/abstract/final class 类名
         java.util.regex.Pattern classPattern = java.util.regex.Pattern.compile(
                 "(?:public\\s+|private\\s+|protected\\s+)?(?:abstract\\s+|final\\s+)?class\\s+(\\w+)",
                 java.util.regex.Pattern.MULTILINE
@@ -161,8 +148,6 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
                     .build());
         }
 
-        // 提取方法签名（不关心方法体）
-        // 匹配: public/private/protected 返回类型 方法名(参数)
         java.util.regex.Pattern methodPattern = java.util.regex.Pattern.compile(
                 "(?:public\\s+|private\\s+|protected\\s+)?(?:static\\s+)?(?:\\w+\\s+)+(\\w+)\\s*\\(([^)]*)\\)\\s*(?:throws\\s+\\w+)?\\s*\\{",
                 java.util.regex.Pattern.MULTILINE
@@ -171,7 +156,7 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
         String packageName = extractPackageName(content);
         while (methodMatcher.find()) {
             String methodName = methodMatcher.group(1);
-            String params = methodMatcher.group(2).replaceAll("\\s+", ""); // 去空白
+            String params = methodMatcher.group(2).replaceAll("\\s+", "");
             String parentClass = findParentClass(content, methodMatcher.start());
             String fullyQualifiedName = packageName.isEmpty()
                     ? parentClass + "#" + methodName + "(" + params + ")"
@@ -185,9 +170,6 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
         return entities;
     }
 
-    /**
-     * 提取包名（正则辅助）
-     */
     private String extractPackageName(String content) {
         java.util.regex.Pattern pkgPattern = java.util.regex.Pattern.compile(
                 "^\\s*package\\s+([\\w.]+)\\s*;",
@@ -197,11 +179,7 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
         return matcher.find() ? matcher.group(1) : "";
     }
 
-    /**
-     * 查找方法所属的外层类（简化实现）
-     */
     private String findParentClass(@NonNull String content, int methodPos) {
-        // 简单实现：从方法位置往前找最近的 class 关键字
         String before = content.substring(0, methodPos);
         java.util.regex.Pattern classPattern = java.util.regex.Pattern.compile(
                 "class\\s+(\\w+)\\s*\\{?\\s*$",
@@ -215,18 +193,14 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
         return lastClass;
     }
 
-    /**
-     * 从 AST 提取实体
-     */
     private @NonNull List<Entity> extractEntities(@NonNull CompilationUnit cu) {
         List<Entity> entities = new ArrayList<>();
         String packageName = cu.getPackageDeclaration()
                 .map(NodeWithName::getNameAsString)
                 .orElse("");
 
-        // 提取所有类/接口/枚举
         cu.findAll(ClassOrInterfaceDeclaration.class).stream()
-                .filter(cls -> cls.findAncestor(ClassOrInterfaceDeclaration.class).isEmpty())  // 只取顶级类
+                .filter(cls -> cls.findAncestor(ClassOrInterfaceDeclaration.class).isEmpty())
                 .forEach(cls -> {
             String className = cls.getNameAsString();
             String fullyQualifiedName = packageName.isEmpty()
@@ -240,9 +214,8 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
                     .signature(classSig)
                     .build());
 
-            // 提取内部类（递归处理）
             cls.findAll(ClassOrInterfaceDeclaration.class).stream()
-                    .skip(1) // 跳过自身
+                    .skip(1)
                     .forEach(innerCls -> {
                         String innerName = innerCls.getNameAsString();
                         String innerFullyQualified = fullyQualifiedName + "$" + innerName;
@@ -255,9 +228,7 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
                     });
         });
 
-        // 提取方法（顶级方法，不进入内部类重复提取）
         cu.findAll(MethodDeclaration.class).forEach(method -> {
-            // 找到所属的父类
             Optional<ClassOrInterfaceDeclaration> parentClass = method.findAncestor(ClassOrInterfaceDeclaration.class);
             if (parentClass.isPresent()) {
                 String className = parentClass.get().getNameAsString();
@@ -282,9 +253,6 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
         return entities;
     }
 
-    /**
-     * 构建类的结构化签名: "SuperName:InterfaceList:fieldCount:methodSig1;methodSig2;..."
-     */
     private @NonNull String buildClassSignature(@NonNull ClassOrInterfaceDeclaration cls) {
         String superName = cls.getExtendedTypes().stream()
                 .map(Node::toString)
@@ -304,9 +272,6 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
         return superName + ":" + interfaces + ":" + fieldCount + ":" + methodSigs;
     }
 
-    /**
-     * 构建方法的结构化签名: "ReturnType:Param1,Param2:bodyHash"
-     */
     private @NonNull String buildMethodSignature(@NonNull MethodDeclaration method) {
         String returnType = method.getType().asString();
         String params = method.getParameters().stream()
@@ -318,9 +283,6 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
         return returnType + ":" + params + ":" + bodyHash;
     }
 
-    /**
-     * 构造降级结果
-     */
     private ParsingResult buildFallbackResult(DataQuality quality, String remark) {
         return ParsingResult.builder()
                 .entities(Collections.emptyList())
@@ -422,9 +384,6 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
         return ChangeNatureFlag.FEAT.code;
     }
 
-    /**
-     * 规范化代码用于比较：去除空白和注释
-     */
     private @NonNull String normalizeForComparison(String code) {
         if (code == null) {
             return "";
@@ -440,7 +399,7 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
         }
         ParsingResult result = parseEntities(sourceCode);
         return result.getEntities().stream()
-                .collect(java.util.stream.Collectors.toMap(Entity::getName, e -> e, (a, _) -> a));
+                .collect(Collectors.toMap(Entity::getName, e -> e, (a, _) -> a));
     }
 
     private boolean isDocsChangeStr(String before, String after) {
@@ -469,9 +428,6 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
         return beforeNormalized.equals(afterNormalized);
     }
 
-    /**
-     * 判断是否为测试文件
-     */
     private boolean isTestFile(SourceCode sourceCode) {
         if (sourceCode == null || sourceCode.getFilePath() == null) {
             return false;
@@ -483,9 +439,6 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
                 || filePath.endsWith("Tests.java");
     }
 
-    /**
-     * 从源码中提取指定实体的方法体/类体
-     */
     private String extractEntityBody(SourceCode sourceCode, String entityName) {
         if (sourceCode == null || sourceCode.getContent() == null || entityName == null) {
             return null;
@@ -493,7 +446,7 @@ public class JavaParser extends AbstractParser<JavaParserConfig> {
         String content = sourceCode.getContent();
 
         try {
-            if (sourceCode.getSizeInBytes() <= config.getMaxParseSizeBytes()) {
+            if (sourceCode.getSizeInBytes() <= getMaxParseSizeBytes()) {
                 ParseResult<CompilationUnit> parseResult = parseWithAST(content);
                 if (parseResult.isSuccessful() && parseResult.getResult().isPresent()) {
                     CompilationUnit cu = parseResult.getResult().get();

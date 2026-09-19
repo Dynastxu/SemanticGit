@@ -134,7 +134,7 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
             SourceCode beforeCode = buildSourceCode(filePath, diff.getOldContent(), language);
             SourceCode afterCode = buildSourceCode(filePath, diff.getNewContent(), language);
 
-            LanguageParser<?> parser = ParserRegistry.getParser(language);
+            LanguageParser parser = ParserRegistry.getParserInstance(language);
             List<EntityChange> entityChanges = parser.parseChangeNatureFlags(beforeCode, afterCode);
 
             for (EntityChange ec : entityChanges) {

@@ -2,10 +2,8 @@ package com.github.semanticgit.core.parser;
 
 import com.github.semanticgit.common.config.ConfigItem;
 import com.github.semanticgit.common.entity.EntityLanguage;
-import com.github.semanticgit.parser.java.RawJavaParser;
+import com.github.semanticgit.parser.java.JavaParser;
 import com.github.semanticgit.parser.java.api.LanguageParser;
-import com.github.semanticgit.parser.java.api.ParserConfig;
-import com.github.semanticgit.parser.java.api.RawLanguageParser;
 import org.jetbrains.annotations.UnmodifiableView;
 import org.jspecify.annotations.NonNull;
 
@@ -17,15 +15,11 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 public class ParserRegistry {
-    @Deprecated
-    private static final Map<EntityLanguage, Supplier<LanguageParser<?>>> parsers = new EnumMap<>(EntityLanguage.class);
-    @Deprecated
-    private static final Map<EntityLanguage, Supplier<? extends ParserConfig>> configs = new EnumMap<>(EntityLanguage.class);
-    private static final Map<EntityLanguage, Function<Map<String, ConfigItem<?>>, RawLanguageParser>> parserMap = new EnumMap<>(EntityLanguage.class);
+    private static final Map<EntityLanguage, Function<Map<String, ConfigItem<?>>, LanguageParser>> parserMap = new EnumMap<>(EntityLanguage.class);
     private static final Map<String, ConfigItem<?>> configMap = new HashMap<>();
 
     static {
-        registerParser(RawJavaParser::new, RawJavaParser::new);
+        registerParser(JavaParser::new, JavaParser::new);
     }
 
     public static void setConfig(String key, ConfigItem<?> config) {
@@ -48,48 +42,22 @@ public class ParserRegistry {
         return Collections.unmodifiableMap(configMap);
     }
 
-    @Deprecated
-    public static void registerParser(EntityLanguage language, Supplier<LanguageParser<? extends ParserConfig>> parser, Supplier<? extends ParserConfig> defaultConfig) {
-        parsers.put(language, parser);
-        configs.put(language, defaultConfig);
-    }
-
-    public static void registerParser(@NonNull Supplier<RawLanguageParser> parser, Function<Map<String, ConfigItem<?>>, RawLanguageParser> parserGenerator) {
-        RawLanguageParser parserExample = parser.get();
+    public static void registerParser(@NonNull Supplier<LanguageParser> parser, Function<Map<String, ConfigItem<?>>, LanguageParser> parserGenerator) {
+        LanguageParser parserExample = parser.get();
         parserMap.put(parserExample.getSupportedLanguage(), parserGenerator);
         parserExample.registerConfigs(configMap);
     }
 
-    /**
-     * @deprecated Use {@link #getParserInstance(EntityLanguage)} instead.
-     */
-    @Deprecated
-    public static @NonNull LanguageParser<?> getParser(EntityLanguage language) {
-        LanguageParser parser = parsers.get(language).get();
-        parser.setConfig(configs.get(language).get());
-        return parser;
-    }
-
-    public static RawLanguageParser getParserInstance(EntityLanguage language) {
+    public static LanguageParser getParserInstance(EntityLanguage language) {
         return parserMap.get(language).apply(configMap);
     }
 
-    public static RawLanguageParser getParserInstance(EntityLanguage language, Map<String, ConfigItem<?>> configMap) {
+    public static LanguageParser getParserInstance(EntityLanguage language, Map<String, ConfigItem<?>> configMap) {
         return parserMap.get(language).apply(configMap);
     }
 
     public static boolean hasParser(EntityLanguage language) {
         return parserMap.containsKey(language);
-    }
-
-    /**
-     * @deprecated Use {@link #getParserInstance(EntityLanguage, Map)} instead.
-     */
-    @Deprecated
-    public static <C extends ParserConfig> @NonNull LanguageParser<C> getParser(EntityLanguage language, C config) {
-        LanguageParser parser = getParser(language);
-        parser.setConfig(config);
-        return parser;
     }
 
     public static EntityLanguage detectLanguage(String filePath) {
