@@ -5,16 +5,15 @@ import com.github.semanticgit.common.entity.ChangeLog;
 import com.github.semanticgit.common.entity.Entity;
 import com.github.semanticgit.core.dto.AuthorChangeStatistics;
 import com.github.semanticgit.core.dto.EntityChangeHistory;
+import com.github.semanticgit.core.dto.StatRow;
 
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.util.List;
 
 public interface ChangeLogDao {
     void save(ChangeLog changeLog);
     void saveAll(List<ChangeLog> changeLogs);
-    ResultSet querySimpleEntityChangeStatistics() throws SQLException;
-    ResultSet queryCommitEntityChangeStatistics(String hash) throws SQLException;
+    List<StatRow> querySimpleEntityChangeStatistics();
+    List<StatRow> queryCommitEntityChangeStatistics(String hash);
     EntityChangeHistory queryEntityChangeHistory(String entityName, String refName);
     List<Entity> findAllEntities();
     AuthorChangeStatistics queryAuthorChangeStatistics(Author author, String refName);

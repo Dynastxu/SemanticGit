@@ -5,14 +5,9 @@ import com.github.semanticgit.common.entity.CommitMeta;
 import com.github.semanticgit.core.dao.CommitMetaDao;
 import com.github.semanticgit.core.db.DatabaseManager;
 import lombok.extern.slf4j.Slf4j;
+import org.jdbi.v3.core.Handle;
 import org.jspecify.annotations.NonNull;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Statement;
-import java.sql.Types;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HexFormat;
@@ -30,19 +25,11 @@ public class CommitMetaDaoImpl implements CommitMetaDao {
     @Override
     public void save(@NonNull CommitMeta commit) {
         try {
-            Connection conn = dbManager.getConnection();
-            conn.setAutoCommit(false);
-            try {
-                Long authorId = upsertAuthor(conn, commit.getAuthor());
-                upsertCommit(conn, commit, authorId, null);
-                conn.commit();
-            } catch (SQLException e) {
-                conn.rollback();
-                throw e;
-            } finally {
-                conn.setAutoCommit(true);
-            }
-        } catch (SQLException e) {
+            dbManager.getJdbi().useTransaction(handle -> {
+                Long authorId = upsertAuthor(handle, commit.getAuthor());
+                upsertCommit(handle, commit, authorId, null);
+            });
+        } catch (Exception e) {
             log.error("Failed to save commit: {}", commit.getHash(), e);
         }
     }
@@ -50,129 +37,123 @@ public class CommitMetaDaoImpl implements CommitMetaDao {
     @Override
     public void saveAll(@NonNull List<CommitMeta> commits) {
         try {
-            Connection conn = dbManager.getConnection();
-            conn.setAutoCommit(false);
-            try {
+            dbManager.getJdbi().useTransaction(handle -> {
                 Map<String, Long> hashToId = new HashMap<>();
                 for (CommitMeta commit : commits) {
-                    Long authorId = upsertAuthor(conn, commit.getAuthor());
+                    Long authorId = upsertAuthor(handle, commit.getAuthor());
                     CommitMeta parent = commit.getParentCommitMeta();
                     Long parentCommitId = parent != null ? hashToId.get(parent.getHash()) : null;
-                    Long commitId = upsertCommit(conn, commit, authorId, parentCommitId);
+                    Long commitId = upsertCommit(handle, commit, authorId, parentCommitId);
                     hashToId.put(commit.getHash(), commitId);
                 }
-                conn.commit();
-                log.info("Saved {} commits to database", commits.size());
-            } catch (SQLException e) {
-                conn.rollback();
-                throw e;
-            } finally {
-                conn.setAutoCommit(true);
-            }
-        } catch (SQLException e) {
+            });
+            log.info("Saved {} commits to database", commits.size());
+        } catch (Exception e) {
             log.error("Failed to save commits batch", e);
         }
     }
 
     @Override
-    public CommitMeta findByHash(String hash) throws SQLException {
+    public CommitMeta findByHash(String hash) {
         byte[] hashBytes = HexFormat.of().parseHex(hash);
-        String sql = """
-            SELECT cm.id, cm.timestamp, cm.message, cm.parent_commit_id,
-                   a.name, a.email,
-                   p.hash AS parent_hash, p.timestamp AS parent_timestamp, p.message AS parent_message,
-                   pa.name AS parent_author_name, pa.email AS parent_author_email
-            FROM commit_meta cm
-            JOIN author a ON cm.author_id = a.id
-            LEFT JOIN commit_meta p ON cm.parent_commit_id = p.id
-            LEFT JOIN author pa ON p.author_id = pa.id
-            WHERE cm.hash = ?
-            """;
-        try (PreparedStatement ps = dbManager.getConnection().prepareStatement(sql)) {
-            ps.setBytes(1, hashBytes);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
-                    Author author = Author.builder()
-                            .name(rs.getString("name"))
-                            .email(rs.getString("email"))
-                            .build();
-
-                    long parentCommitId = rs.getLong("parent_commit_id");
-                    CommitMeta parentCommitMeta = null;
-                    if (!rs.wasNull()) {
-                        byte[] parentHashBytes = rs.getBytes("parent_hash");
-                        Author parentAuthor = Author.builder()
-                                .name(rs.getString("parent_author_name"))
-                                .email(rs.getString("parent_author_email"))
+        try {
+            return dbManager.getJdbi().withHandle(handle ->
+                handle.createQuery("""
+                            SELECT cm.id, cm.timestamp, cm.message, cm.parent_commit_id,
+                                   a.name, a.email,
+                                   p.hash AS parent_hash, p.timestamp AS parent_timestamp, p.message AS parent_message,
+                                   pa.name AS parent_author_name, pa.email AS parent_author_email
+                            FROM commit_meta cm
+                            JOIN author a ON cm.author_id = a.id
+                            LEFT JOIN commit_meta p ON cm.parent_commit_id = p.id
+                            LEFT JOIN author pa ON p.author_id = pa.id
+                            WHERE cm.hash = :hash
+                            """)
+                    .bind("hash", hashBytes)
+                    .map((rs, ctx) -> {
+                        Author author = Author.builder()
+                                .name(rs.getString("name"))
+                                .email(rs.getString("email"))
                                 .build();
-                        parentCommitMeta = CommitMeta.builder()
-                                .id(parentCommitId)
-                                .hash(HexFormat.of().formatHex(parentHashBytes))
-                                .author(parentAuthor)
-                                .timestamp(rs.getInt("parent_timestamp"))
-                                .message(rs.getString("parent_message"))
-                                .build();
-                    }
 
-                    return CommitMeta.builder()
-                            .id(rs.getLong("id"))
-                            .hash(hash)
-                            .author(author)
-                            .timestamp(rs.getInt("timestamp"))
-                            .message(rs.getString("message"))
-                            .parentCommitMeta(parentCommitMeta)
-                            .build();
-                }
-            }
+                        long parentCommitId = rs.getLong("parent_commit_id");
+                        CommitMeta parentCommitMeta = null;
+                        if (!rs.wasNull()) {
+                            byte[] parentHashBytes = rs.getBytes("parent_hash");
+                            Author parentAuthor = Author.builder()
+                                    .name(rs.getString("parent_author_name"))
+                                    .email(rs.getString("parent_author_email"))
+                                    .build();
+                            parentCommitMeta = CommitMeta.builder()
+                                    .id(parentCommitId)
+                                    .hash(HexFormat.of().formatHex(parentHashBytes))
+                                    .author(parentAuthor)
+                                    .timestamp(rs.getInt("parent_timestamp"))
+                                    .message(rs.getString("parent_message"))
+                                    .build();
+                        }
+
+                        return CommitMeta.builder()
+                                .id(rs.getLong("id"))
+                                .hash(hash)
+                                .author(author)
+                                .timestamp(rs.getInt("timestamp"))
+                                .message(rs.getString("message"))
+                                .parentCommitMeta(parentCommitMeta)
+                                .build();
+                    })
+                    .findOne()
+                    .orElse(null)
+            );
+        } catch (Exception e) {
+            log.error("Failed to find commit by hash: {}", hash, e);
+            return null;
         }
-        return null;
     }
 
     @Override
     public List<CommitMeta> findAll() {
-        List<CommitMeta> commits = new ArrayList<>();
-        String sql = """
-            SELECT cm.id, cm.hash, cm.timestamp, cm.message,
-                   a.name AS author_name, a.email AS author_email,
-                   p.hash AS parent_hash, p.timestamp AS parent_timestamp, p.message AS parent_message,
-                   pa.name AS parent_author_name, pa.email AS parent_author_email
-            FROM commit_meta cm
-            JOIN author a ON cm.author_id = a.id
-            LEFT JOIN commit_meta p ON cm.parent_commit_id = p.id
-            LEFT JOIN author pa ON p.author_id = pa.id
-            ORDER BY cm.timestamp DESC
-            """;
-        try (Statement stmt = dbManager.getConnection().createStatement();
-             ResultSet rs = stmt.executeQuery(sql)) {
-            while (rs.next()) {
-                commits.add(buildCommitMetaFromResultSet(rs));
-            }
-        } catch (SQLException e) {
+        try {
+            return dbManager.getJdbi().withHandle(handle ->
+                handle.createQuery("""
+                            SELECT cm.id, cm.hash, cm.timestamp, cm.message,
+                                   a.name AS author_name, a.email AS author_email,
+                                   p.hash AS parent_hash, p.timestamp AS parent_timestamp, p.message AS parent_message,
+                                   pa.name AS parent_author_name, pa.email AS parent_author_email
+                            FROM commit_meta cm
+                            JOIN author a ON cm.author_id = a.id
+                            LEFT JOIN commit_meta p ON cm.parent_commit_id = p.id
+                            LEFT JOIN author pa ON p.author_id = pa.id
+                            ORDER BY cm.timestamp DESC
+                            """)
+                    .map((rs, ctx) -> buildCommitMetaFromResultSet(rs))
+                    .list()
+            );
+        } catch (Exception e) {
             log.error("Failed to find all commits", e);
+            return List.of();
         }
-        return commits;
     }
 
     @Override
     public List<Author> findAllAuthors() {
-        List<Author> authors = new ArrayList<>();
-        String sql = "SELECT id, name, email FROM author ORDER BY name";
-        try (Statement stmt = dbManager.getConnection().createStatement();
-             ResultSet rs = stmt.executeQuery(sql)) {
-            while (rs.next()) {
-                authors.add(Author.builder()
+        try {
+            return dbManager.getJdbi().withHandle(handle ->
+                handle.createQuery("SELECT id, name, email FROM author ORDER BY name")
+                    .map((rs, ctx) -> Author.builder()
                         .id(rs.getLong("id"))
                         .name(rs.getString("name"))
                         .email(rs.getString("email"))
-                        .build());
-            }
-        } catch (SQLException e) {
+                        .build())
+                    .list()
+            );
+        } catch (Exception e) {
             log.error("Failed to find all authors", e);
+            return List.of();
         }
-        return authors;
     }
 
-    private CommitMeta buildCommitMetaFromResultSet(ResultSet rs) throws SQLException {
+    private CommitMeta buildCommitMetaFromResultSet(java.sql.ResultSet rs) throws java.sql.SQLException {
         byte[] hashBytes = rs.getBytes("hash");
         String hash = HexFormat.of().formatHex(hashBytes);
 
@@ -206,52 +187,35 @@ public class CommitMetaDaoImpl implements CommitMetaDao {
                 .build();
     }
 
-    private @NonNull Long upsertAuthor(Connection conn, @NonNull Author author) throws SQLException {
-        String sql = """
-            INSERT INTO author (name, email) VALUES (?, ?)
-            ON CONFLICT(name, email) DO UPDATE SET name = excluded.name
-            RETURNING id
-        """;
-        try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, author.getName());
-            ps.setString(2, author.getEmail());
-            try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
-                    return rs.getLong(1);
-                }
-            }
-        }
-        throw new SQLException("Failed to upsert author");
+    private @NonNull Long upsertAuthor(Handle handle, @NonNull Author author) {
+        return handle.createUpdate("""
+                    INSERT INTO author (name, email) VALUES (:name, :email)
+                    ON CONFLICT(name, email) DO UPDATE SET name = excluded.name
+                    RETURNING id
+                """)
+                .bind("name", author.getName())
+                .bind("email", author.getEmail())
+                .executeAndReturnGeneratedKeys()
+                .mapTo(Long.class)
+                .one();
     }
 
-    private @NonNull Long upsertCommit(@NonNull Connection conn, @NonNull CommitMeta commit,
-                                        Long authorId, Long parentCommitId) throws SQLException {
-        String insertSql = """
-            INSERT OR IGNORE INTO commit_meta (hash, author_id, timestamp, message, parent_commit_id)
-            VALUES (?, ?, ?, ?, ?)
-        """;
-        try (PreparedStatement ps = conn.prepareStatement(insertSql)) {
-            ps.setBytes(1, HexFormat.of().parseHex(commit.getHash()));
-            ps.setLong(2, authorId);
-            ps.setInt(3, commit.getTimestamp());
-            ps.setString(4, commit.getMessage());
-            if (parentCommitId != null) {
-                ps.setLong(5, parentCommitId);
-            } else {
-                ps.setNull(5, Types.INTEGER);
-            }
-            ps.executeUpdate();
-        }
+    private @NonNull Long upsertCommit(Handle handle, @NonNull CommitMeta commit,
+                                        Long authorId, Long parentCommitId) {
+        handle.createUpdate("""
+                    INSERT OR IGNORE INTO commit_meta (hash, author_id, timestamp, message, parent_commit_id)
+                    VALUES (:hash, :author_id, :timestamp, :message, :parent_commit_id)
+                """)
+                .bind("hash", HexFormat.of().parseHex(commit.getHash()))
+                .bind("author_id", authorId)
+                .bind("timestamp", commit.getTimestamp())
+                .bind("message", commit.getMessage())
+                .bind("parent_commit_id", parentCommitId)
+                .execute();
 
-        String selectSql = "SELECT id FROM commit_meta WHERE hash = ?";
-        try (PreparedStatement ps = conn.prepareStatement(selectSql)) {
-            ps.setBytes(1, HexFormat.of().parseHex(commit.getHash()));
-            try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
-                    return rs.getLong(1);
-                }
-            }
-        }
-        throw new SQLException("Failed to upsert commit: " + commit.getHash());
+        return handle.createQuery("SELECT id FROM commit_meta WHERE hash = :hash")
+                .bind("hash", HexFormat.of().parseHex(commit.getHash()))
+                .mapTo(Long.class)
+                .one();
     }
 }
