@@ -1,24 +1,29 @@
 package com.github.semanticgit.core;
 
-import com.github.semanticgit.common.entity.ChangeNatureFlag;
-import com.github.semanticgit.common.entity.ChangeOperation;
+import com.github.semanticgit.common.entity.*;
 import com.github.semanticgit.core.dao.ChangeLogDao;
 import com.github.semanticgit.core.dao.CommitMetaDao;
 import com.github.semanticgit.core.dao.impl.ChangeLogDaoImpl;
 import com.github.semanticgit.core.dao.impl.CommitMetaDaoImpl;
 import com.github.semanticgit.core.db.DatabaseManager;
+import com.github.semanticgit.core.dto.AuthorChangeStatistics;
 import com.github.semanticgit.core.dto.CommitEntityChangeStatistics;
 import com.github.semanticgit.core.dto.EntityChangeHistory;
 import com.github.semanticgit.core.dto.SimpleEntityChangeStatistics;
 import lombok.extern.slf4j.Slf4j;
+import org.jspecify.annotations.Nullable;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.EnumMap;
 import java.util.EnumSet;
+import java.util.List;
 import java.util.Map;
 
+/**
+ * @see com.github.semanticgit.core.AbstractStatisticsProvider
+ */
 @Slf4j
 public class StatisticsProvider extends AbstractStatisticsProvider {
     private final DatabaseManager dbManager;
@@ -126,6 +131,26 @@ public class StatisticsProvider extends AbstractStatisticsProvider {
     public EntityChangeHistory getEntityChangeHistory(String entityName, String refName) {
         ChangeLogDao changeLogDao = new ChangeLogDaoImpl(dbManager);
         return changeLogDao.queryEntityChangeHistory(entityName, refName);
+    }
+
+    @Override
+    public AuthorChangeStatistics getAuthorChangeStatistics(Author author, @Nullable String refName) {
+        return null;
+    }
+
+    @Override
+    public List<Author> getAuthors() {
+        return List.of();
+    }
+
+    @Override
+    public List<Entity> getEntities() {
+        return List.of();
+    }
+
+    @Override
+    public List<CommitMeta> getCommits() {
+        return List.of();
     }
 
     private int countCommits() {
