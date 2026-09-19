@@ -9,7 +9,9 @@ import java.nio.file.Path;
         description = "Show statistics of the repository",
         mixinStandardHelpOptions = true,
         subcommands = {
-                OverviewCommand.class
+                OverviewCommand.class,
+                CommitCommand.class,
+                EntityCommand.class
         }
 )
 public class StatisticsCommand implements Runnable {
