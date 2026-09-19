@@ -11,7 +11,9 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.sql.Types;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
@@ -124,6 +126,84 @@ public class CommitMetaDaoImpl implements CommitMetaDao {
             }
         }
         return null;
+    }
+
+    @Override
+    public List<CommitMeta> findAll() {
+        List<CommitMeta> commits = new ArrayList<>();
+        String sql = """
+            SELECT cm.id, cm.hash, cm.timestamp, cm.message,
+                   a.name AS author_name, a.email AS author_email,
+                   p.hash AS parent_hash, p.timestamp AS parent_timestamp, p.message AS parent_message,
+                   pa.name AS parent_author_name, pa.email AS parent_author_email
+            FROM commit_meta cm
+            JOIN author a ON cm.author_id = a.id
+            LEFT JOIN commit_meta p ON cm.parent_commit_id = p.id
+            LEFT JOIN author pa ON p.author_id = pa.id
+            ORDER BY cm.timestamp DESC
+            """;
+        try (Statement stmt = dbManager.getConnection().createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+            while (rs.next()) {
+                commits.add(buildCommitMetaFromResultSet(rs));
+            }
+        } catch (SQLException e) {
+            log.error("Failed to find all commits", e);
+        }
+        return commits;
+    }
+
+    @Override
+    public List<Author> findAllAuthors() {
+        List<Author> authors = new ArrayList<>();
+        String sql = "SELECT id, name, email FROM author ORDER BY name";
+        try (Statement stmt = dbManager.getConnection().createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+            while (rs.next()) {
+                authors.add(Author.builder()
+                        .id(rs.getLong("id"))
+                        .name(rs.getString("name"))
+                        .email(rs.getString("email"))
+                        .build());
+            }
+        } catch (SQLException e) {
+            log.error("Failed to find all authors", e);
+        }
+        return authors;
+    }
+
+    private CommitMeta buildCommitMetaFromResultSet(ResultSet rs) throws SQLException {
+        byte[] hashBytes = rs.getBytes("hash");
+        String hash = HexFormat.of().formatHex(hashBytes);
+
+        Author author = Author.builder()
+                .name(rs.getString("author_name"))
+                .email(rs.getString("author_email"))
+                .build();
+
+        byte[] parentHashBytes = rs.getBytes("parent_hash");
+        CommitMeta parentCommitMeta = null;
+        if (!rs.wasNull()) {
+            Author parentAuthor = Author.builder()
+                    .name(rs.getString("parent_author_name"))
+                    .email(rs.getString("parent_author_email"))
+                    .build();
+            parentCommitMeta = CommitMeta.builder()
+                    .hash(HexFormat.of().formatHex(parentHashBytes))
+                    .author(parentAuthor)
+                    .timestamp(rs.getInt("parent_timestamp"))
+                    .message(rs.getString("parent_message"))
+                    .build();
+        }
+
+        return CommitMeta.builder()
+                .id(rs.getLong("id"))
+                .hash(hash)
+                .author(author)
+                .timestamp(rs.getInt("timestamp"))
+                .message(rs.getString("message"))
+                .parentCommitMeta(parentCommitMeta)
+                .build();
     }
 
     private @NonNull Long upsertAuthor(Connection conn, @NonNull Author author) throws SQLException {

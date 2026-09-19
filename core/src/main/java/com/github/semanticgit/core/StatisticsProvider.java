@@ -135,22 +135,26 @@ public class StatisticsProvider extends AbstractStatisticsProvider {
 
     @Override
     public AuthorChangeStatistics getAuthorChangeStatistics(Author author, @Nullable String refName) {
-        return null;
+        ChangeLogDao changeLogDao = new ChangeLogDaoImpl(dbManager);
+        return changeLogDao.queryAuthorChangeStatistics(author, refName);
     }
 
     @Override
     public List<Author> getAuthors() {
-        return List.of();
+        CommitMetaDao commitMetaDao = new CommitMetaDaoImpl(dbManager);
+        return commitMetaDao.findAllAuthors();
     }
 
     @Override
     public List<Entity> getEntities() {
-        return List.of();
+        ChangeLogDao changeLogDao = new ChangeLogDaoImpl(dbManager);
+        return changeLogDao.findAllEntities();
     }
 
     @Override
     public List<CommitMeta> getCommits() {
-        return List.of();
+        CommitMetaDao commitMetaDao = new CommitMetaDaoImpl(dbManager);
+        return commitMetaDao.findAll();
     }
 
     private int countCommits() {

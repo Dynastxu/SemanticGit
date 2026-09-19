@@ -3,14 +3,18 @@ package com.github.semanticgit.core.dao.impl;
 import com.github.semanticgit.common.entity.*;
 import com.github.semanticgit.core.dao.ChangeLogDao;
 import com.github.semanticgit.core.db.DatabaseManager;
+import com.github.semanticgit.core.dto.AuthorChangeStatistics;
 import com.github.semanticgit.core.dto.EntityChangeHistory;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.NonNull;
 
 import java.sql.*;
 import java.util.ArrayList;
+import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 
 @Slf4j
 public class ChangeLogDaoImpl implements ChangeLogDao {
@@ -248,6 +252,217 @@ public class ChangeLogDaoImpl implements ChangeLogDao {
             log.error("Failed to query entity change history for entity={} ref={}", entityName, refName, e);
         }
         return EntityChangeHistory.builder().changes(changes).build();
+    }
+
+    @Override
+    public List<Entity> findAllEntities() {
+        List<Entity> entities = new ArrayList<>();
+        String sql = "SELECT id, name, language, kind FROM entity ORDER BY name";
+        try (Statement stmt = dbManager.getConnection().createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+            while (rs.next()) {
+                entities.add(Entity.builder()
+                        .id(rs.getLong("id"))
+                        .name(rs.getString("name"))
+                        .language(EntityLanguage.fromCode(rs.getInt("language")))
+                        .kind(EntityKind.fromCode(rs.getInt("kind")))
+                        .build());
+            }
+        } catch (SQLException e) {
+            log.error("Failed to find all entities", e);
+        }
+        return entities;
+    }
+
+    @Override
+    public AuthorChangeStatistics queryAuthorChangeStatistics(Author author, String refName) {
+        try {
+            Map<ChangeOperation, Float> operationFloatMap = new EnumMap<>(ChangeOperation.class);
+            Map<ChangeNatureFlag, Float> natureFlagFloatMap = new EnumMap<>(ChangeNatureFlag.class);
+
+            if (refName != null) {
+                Long headCommitId = resolveRefCommitId(refName);
+                if (headCommitId == null) {
+                    log.warn("Ref not found: {}", refName);
+                    return null;
+                }
+                fillAuthorStatisticsWithRef(author, headCommitId, operationFloatMap, natureFlagFloatMap);
+            } else {
+                fillAuthorStatisticsNoRef(author, operationFloatMap, natureFlagFloatMap);
+            }
+
+            return AuthorChangeStatistics.builder()
+                    .author(author)
+                    .operationFloatMap(operationFloatMap)
+                    .natureFlagFloatMap(natureFlagFloatMap)
+                    .build();
+        } catch (SQLException e) {
+            log.error("Failed to query author change statistics for author={} ref={}", author, refName, e);
+            return null;
+        }
+    }
+
+    private void fillAuthorStatisticsNoRef(Author author,
+                                           Map<ChangeOperation, Float> operationFloatMap,
+                                           Map<ChangeNatureFlag, Float> natureFlagFloatMap) throws SQLException {
+        String sql = """
+            WITH commit_counts AS (
+                SELECT cl.commit_id, COUNT(*) AS cnt
+                FROM change_log cl
+                JOIN commit_meta cm ON cl.commit_id = cm.id
+                JOIN author a ON cm.author_id = a.id
+                WHERE a.name = ? AND a.email = ?
+                GROUP BY cl.commit_id
+            ),
+            total_commits AS (
+                SELECT COUNT(*) AS total FROM commit_counts
+            ),
+            weighted AS (
+                SELECT
+                    cl.operation,
+                    COALESCE(cl.nature_flag, 0) AS nature_flag,
+                    1.0 / cc.cnt AS w
+                FROM change_log cl
+                JOIN commit_counts cc ON cc.commit_id = cl.commit_id
+            ),
+            op_stats AS (
+                SELECT
+                    operation AS value,
+                    SUM(w) / (SELECT total FROM total_commits) AS operation_ratio
+                FROM weighted
+                GROUP BY operation
+            ),
+            nf_stats AS (
+                SELECT
+                    nature_flag AS value,
+                    SUM(w) / (SELECT total FROM total_commits) AS nature_flag_ratio
+                FROM weighted
+                GROUP BY nature_flag
+            ),
+            all_values AS (
+                SELECT value FROM op_stats
+                UNION
+                SELECT value FROM nf_stats
+            )
+            SELECT
+                av.value,
+                ROUND(COALESCE(op.operation_ratio, 0), 6) AS operation_ratio,
+                ROUND(COALESCE(nf.nature_flag_ratio, 0), 6) AS nature_flag_ratio
+            FROM all_values av
+            LEFT JOIN op_stats op ON op.value = av.value
+            LEFT JOIN nf_stats nf ON nf.value = av.value
+            ORDER BY av.value
+            """;
+        try (PreparedStatement ps = dbManager.getConnection().prepareStatement(sql)) {
+            ps.setString(1, author.getName());
+            ps.setString(2, author.getEmail());
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    int code = rs.getInt("value");
+                    float opRatio = rs.getFloat("operation_ratio");
+                    float nfRatio = rs.getFloat("nature_flag_ratio");
+
+                    if (opRatio > 0 && ChangeOperation.hasCode(code)) {
+                        ChangeOperation op = ChangeOperation.fromCode(code);
+                        operationFloatMap.put(op, opRatio);
+                    }
+
+                    if (nfRatio > 0) {
+                        EnumSet<ChangeNatureFlag> nf = ChangeNatureFlag.fromCode(code);
+                        for (ChangeNatureFlag flag : nf) {
+                            natureFlagFloatMap.merge(flag, nfRatio, Float::sum);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private void fillAuthorStatisticsWithRef(Author author, Long headCommitId,
+                                             Map<ChangeOperation, Float> operationFloatMap,
+                                             Map<ChangeNatureFlag, Float> natureFlagFloatMap) throws SQLException {
+        String sql = """
+            WITH RECURSIVE commit_chain AS (
+                SELECT cm.id
+                FROM commit_meta cm
+                WHERE cm.id = ?
+                UNION ALL
+                SELECT cm.id
+                FROM commit_meta cm
+                JOIN commit_chain cc ON cm.id = cc.parent_commit_id
+            ),
+            commit_counts AS (
+                SELECT cl.commit_id, COUNT(*) AS cnt
+                FROM change_log cl
+                JOIN commit_meta cm ON cl.commit_id = cm.id
+                JOIN author a ON cm.author_id = a.id
+                JOIN commit_chain ch ON cm.id = ch.id
+                WHERE a.name = ? AND a.email = ?
+                GROUP BY cl.commit_id
+            ),
+            total_commits AS (
+                SELECT COUNT(*) AS total FROM commit_counts
+            ),
+            weighted AS (
+                SELECT
+                    cl.operation,
+                    COALESCE(cl.nature_flag, 0) AS nature_flag,
+                    1.0 / cc.cnt AS w
+                FROM change_log cl
+                JOIN commit_counts cc ON cc.commit_id = cl.commit_id
+            ),
+            op_stats AS (
+                SELECT
+                    operation AS value,
+                    SUM(w) / (SELECT total FROM total_commits) AS operation_ratio
+                FROM weighted
+                GROUP BY operation
+            ),
+            nf_stats AS (
+                SELECT
+                    nature_flag AS value,
+                    SUM(w) / (SELECT total FROM total_commits) AS nature_flag_ratio
+                FROM weighted
+                GROUP BY nature_flag
+            ),
+            all_values AS (
+                SELECT value FROM op_stats
+                UNION
+                SELECT value FROM nf_stats
+            )
+            SELECT
+                av.value,
+                ROUND(COALESCE(op.operation_ratio, 0), 6) AS operation_ratio,
+                ROUND(COALESCE(nf.nature_flag_ratio, 0), 6) AS nature_flag_ratio
+            FROM all_values av
+            LEFT JOIN op_stats op ON op.value = av.value
+            LEFT JOIN nf_stats nf ON nf.value = av.value
+            ORDER BY av.value
+            """;
+        try (PreparedStatement ps = dbManager.getConnection().prepareStatement(sql)) {
+            ps.setLong(1, headCommitId);
+            ps.setString(2, author.getName());
+            ps.setString(3, author.getEmail());
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    int code = rs.getInt("value");
+                    float opRatio = rs.getFloat("operation_ratio");
+                    float nfRatio = rs.getFloat("nature_flag_ratio");
+
+                    if (opRatio > 0 && ChangeOperation.hasCode(code)) {
+                        ChangeOperation op = ChangeOperation.fromCode(code);
+                        operationFloatMap.put(op, opRatio);
+                    }
+
+                    if (nfRatio > 0) {
+                        EnumSet<ChangeNatureFlag> nf = ChangeNatureFlag.fromCode(code);
+                        for (ChangeNatureFlag flag : nf) {
+                            natureFlagFloatMap.merge(flag, nfRatio, Float::sum);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private void debugChainCount(String entityName, Long headCommitId) {
