@@ -42,11 +42,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.github.semanticgit.common.config.ConfigItems
 import com.github.semanticgit.common.entity.ChangeNatureFlag
 import com.github.semanticgit.common.entity.ChangeOperation
+import com.github.semanticgit.core.AnalysisEngine
 import com.github.semanticgit.core.StatisticsProvider
 import com.github.semanticgit.core.db.DatabaseManager
 import com.github.semanticgit.core.dto.SimpleEntityChangeStatistics
+import com.github.semanticgit.core.parser.ParserRegistry
+import com.github.semanticgit.parser.java.api.LanguageParser
 import com.github.semanticgit.ui.LocalStrings
 import com.github.semanticgit.ui.chart.EChartsView
 import kotlinx.coroutines.Dispatchers
@@ -101,10 +105,9 @@ fun RepoPage(modifier: Modifier = Modifier) {
         maxRegexSizeMb = maxRegexSizeMbText.toLongOrNull() ?: 2L
     )
 
-    fun startAnalysis() {
+    fun startAnalysis(forceReanalyze: Boolean = false) {
         val path = selectedPath ?: return
-        val settings = buildSettings()
-
+        
         scope.launch {
             isAnalyzing = true
             showResult = true
@@ -112,27 +115,16 @@ fun RepoPage(modifier: Modifier = Modifier) {
             statistics = null
 
             try {
-                withContext(Dispatchers.IO) {
-                    val dbDir = "${System.getProperty("user.home")}/.semanticgit/db"
-                    val runner = DefaultAnalysisRunner
-
-                    if (!runner.isDatabaseExists(path, dbDir, settings)) {
-                        val result = runner.fullAnalysis(path, dbDir, settings)
-                        if (!result.success) {
-                            errorMessage = result.failMessage.ifBlank { strings.repoAnalysisFailed }
-                            return@withContext
-                        }
+                // ✅ 构建配置并传递给核心分析函数
+                val settings = buildSettings()
+                val result = executeCoreAnalysis(path, forceReanalyze, settings)
+                
+                when (result) {
+                    is AnalysisResult.Success -> {
+                        statistics = result.statistics
                     }
-
-                    val dbName = Integer.toHexString(File(path).absolutePath.hashCode())
-                    DatabaseManager(dbDir, dbName, false).use { dbManager ->
-                        val provider = StatisticsProvider(dbManager)
-                        val stats = provider.simpleEntityChangeStatistics
-                        if (stats == null || !stats.isSuccess) {
-                            errorMessage = strings.repoAnalysisFailed
-                        } else {
-                            statistics = stats
-                        }
+                    is AnalysisResult.Error -> {
+                        errorMessage = result.message
                     }
                 }
             } catch (e: Exception) {
@@ -142,6 +134,10 @@ fun RepoPage(modifier: Modifier = Modifier) {
                 isAnalyzing = false
             }
         }
+    }
+    
+    fun forceReanalysis() {
+        startAnalysis(forceReanalyze = true)
     }
 
     Column(
@@ -251,7 +247,7 @@ fun RepoPage(modifier: Modifier = Modifier) {
                             statistics = null
                             errorMessage = null
                         },
-                        onReanalyze = { startAnalysis() }
+                        onReanalyze = { forceReanalysis() }
                     )
                 }
                 else -> {
@@ -569,6 +565,120 @@ private fun <T> buildRoseChartOption(
             }]
         }
     """.trimIndent()
+}
+
+/**
+ * 分析结果密封类 - 强制处理所有情况
+ */
+sealed class AnalysisResult {
+    data class Success(val statistics: SimpleEntityChangeStatistics) : AnalysisResult()
+    data class Error(val message: String) : AnalysisResult()
+}
+
+/**
+ * 核心分析逻辑 - 直接调用 core 模块
+ *
+ * 职责：
+ * 1. 调用 AnalysisEngine 执行分析（如需要）
+ * 2. 通过 StatisticsProvider 查询结果
+ * 3. 返回统一的结果类型
+ *
+ * 特点：
+ * - 纯业务逻辑，无 UI 依赖
+ * - 可独立测试（通过 mock core 模块）
+ * - 异常安全，返回 Error 而非抛出异常
+ */
+private suspend fun executeCoreAnalysis(
+    repoPath: String, 
+    forceReanalyze: Boolean = false,
+    settings: ParserSettings? = null  // ← 新增配置参数
+): AnalysisResult {
+    return withContext(Dispatchers.IO) {
+        try {
+            val dbDir = "${System.getProperty("user.home")}/.semanticgit/db"
+            val engine = AnalysisEngine()
+            val dbName = Integer.toHexString(File(repoPath).absolutePath.hashCode())
+
+            // ✅ 关键：分析前配置 ParserRegistry
+            settings?.let { applyParserConfigs(it) }
+
+            // 判断是否需要执行全量分析
+            val needAnalyze = forceReanalyze || !engine.isDatabaseExists(repoPath, dbDir)
+            
+            if (needAnalyze) {
+                if (forceReanalyze) {
+                    // 强制重分析：删除旧数据库
+                    val dbFile = java.io.File(dbDir, "$dbName.db")
+                    if (dbFile.exists()) {
+                        dbFile.delete()
+                    }
+                }
+                
+                val future = engine.fullAnalysisAsync(
+                    repoPath,
+                    dbDir,
+                    dbName,
+                    { /* 进度回调 */ },
+                    { e ->
+                        e.printStackTrace()
+                        null
+                    }
+                )
+                future.join()  // 等待分析完成
+            }
+
+            // 查询统计结果
+            DatabaseManager(dbDir, dbName, false).use { dbManager ->
+                val provider = StatisticsProvider(dbManager)
+                val stats = provider.simpleEntityChangeStatistics
+                
+                if (stats != null && stats.isSuccess) {
+                    AnalysisResult.Success(stats)
+                } else {
+                    AnalysisResult.Error("Failed to retrieve statistics")
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            AnalysisResult.Error(e.message ?: "Unknown error during analysis")
+        }
+    }
+}
+
+/**
+ * 将 UI 配置应用到 ParserRegistry 全局配置中心
+ *
+ * 这是连接 UI 层和 Core 模块的桥梁：
+ * - UI 层收集用户输入的配置参数
+ * - 通过此函数写入 ParserRegistry 的全局 configMap
+ * - AnalysisEngine 内部通过 ParserRegistry.getParserInstance() 读取这些配置
+ *
+ * @param settings 用户在 UI 上配置的解析器参数
+ */
+private fun applyParserConfigs(settings: ParserSettings) {
+    try {
+        // 设置超时时间（毫秒）
+        ParserRegistry.setConfig(
+            LanguageParser.CONFIG_KEY_TIMEOUT,
+            ConfigItems.LONG(settings.timeoutMs).build()
+        )
+
+        // 设置最大 AST 解析文件大小（字节）
+        ParserRegistry.setConfig(
+            LanguageParser.CONFIG_KEY_MAX_PARSE_SIZE,
+            ConfigItems.LONG(settings.maxParseSizeMb * 1024L * 1024L).build()
+        )
+
+        // 设置最大正则解析文件大小（字节）
+        ParserRegistry.setConfig(
+            LanguageParser.CONFIG_KEY_MAX_REGEX_SIZE,
+            ConfigItems.LONG(settings.maxRegexSizeMb * 1024L * 1024L).build()
+        )
+        
+        println("[Config Applied] timeout=${settings.timeoutMs}ms, maxParse=${settings.maxParseSizeMb}MB, maxRegex=${settings.maxRegexSizeMb}MB")
+    } catch (e: Exception) {
+        System.err.println("[Warning] Failed to apply parser configs: ${e.message}")
+    }
 }
 
 internal fun computeDisplayNames(paths: List<String>): List<String> {
