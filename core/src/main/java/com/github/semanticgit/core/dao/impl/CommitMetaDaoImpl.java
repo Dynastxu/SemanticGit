@@ -7,6 +7,7 @@ import com.github.semanticgit.core.db.DatabaseManager;
 import lombok.extern.slf4j.Slf4j;
 import org.jdbi.v3.core.Handle;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import java.util.HashMap;
 import java.util.HexFormat;
@@ -41,7 +42,7 @@ public class CommitMetaDaoImpl implements CommitMetaDao {
                 for (CommitMeta commit : commits) {
                     Long authorId = upsertAuthor(handle, commit.getAuthor());
                     CommitMeta parent = commit.getParentCommitMeta();
-                    Long parentCommitId = parent != null ? hashToId.get(parent.getHash()) : null;
+                    Long parentCommitId = resolveParentCommitId(handle, hashToId, parent);
                     Long commitId = upsertCommit(handle, commit, authorId, parentCommitId);
                     hashToId.put(commit.getHash(), commitId);
                 }
@@ -135,6 +136,42 @@ public class CommitMetaDaoImpl implements CommitMetaDao {
     }
 
     @Override
+    public CommitMeta findLatest() {
+        try {
+            return dbManager.getJdbi().withHandle(handle ->
+                handle.createQuery("""
+                            SELECT cm.id, cm.hash, cm.timestamp, cm.message,
+                                   a.name AS author_name, a.email AS author_email
+                            FROM commit_meta cm
+                            JOIN author a ON cm.author_id = a.id
+                            ORDER BY cm.timestamp DESC, cm.id DESC
+                            LIMIT 1
+                            """)
+                    .map((rs, ctx) -> {
+                        byte[] hashBytes = rs.getBytes("hash");
+                        String hash = HexFormat.of().formatHex(hashBytes);
+                        Author author = Author.builder()
+                                .name(rs.getString("author_name"))
+                                .email(rs.getString("author_email"))
+                                .build();
+                        return CommitMeta.builder()
+                                .id(rs.getLong("id"))
+                                .hash(hash)
+                                .author(author)
+                                .timestamp(rs.getInt("timestamp"))
+                                .message(rs.getString("message"))
+                                .build();
+                    })
+                    .findOne()
+                    .orElse(null)
+            );
+        } catch (Exception e) {
+            log.error("Failed to find latest commit", e);
+            return null;
+        }
+    }
+
+    @Override
     public List<Author> findAllAuthors() {
         try {
             return dbManager.getJdbi().withHandle(handle ->
@@ -202,15 +239,41 @@ public class CommitMetaDaoImpl implements CommitMetaDao {
                 .build();
     }
 
+    @Nullable
+    private Long resolveParentCommitId(Handle handle, Map<String, Long> hashToId,
+                                       CommitMeta parent) {
+        if (parent == null) {
+            return null;
+        }
+        Long id = hashToId.get(parent.getHash());
+        if (id != null) {
+            return id;
+        }
+        return handle.createQuery("SELECT id FROM commit_meta WHERE hash = :hash")
+                .bind("hash", HexFormat.of().parseHex(parent.getHash()))
+                .mapTo(Long.class)
+                .findOne()
+                .orElse(null);
+    }
+
     private @NonNull Long upsertAuthor(Handle handle, @NonNull Author author) {
-        return handle.createUpdate("""
-                    INSERT INTO author (name, email) VALUES (:name, :email)
-                    ON CONFLICT(name, email) DO UPDATE SET name = excluded.name
-                    RETURNING id
-                """)
+        Long existingId = handle.createQuery(
+                        "SELECT id FROM author WHERE name = :name AND email = :email")
                 .bind("name", author.getName())
                 .bind("email", author.getEmail())
-                .executeAndReturnGeneratedKeys()
+                .mapTo(Long.class)
+                .findOne()
+                .orElse(null);
+
+        if (existingId != null) {
+            return existingId;
+        }
+
+        return handle.createUpdate(
+                        "INSERT INTO author (name, email) VALUES (:name, :email)")
+                .bind("name", author.getName())
+                .bind("email", author.getEmail())
+                .executeAndReturnGeneratedKeys("id")
                 .mapTo(Long.class)
                 .one();
     }

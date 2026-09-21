@@ -10,6 +10,7 @@ public interface CommitMetaDao {
     void saveAll(List<CommitMeta> commits);
     CommitMeta findByHash(String hash);
     List<CommitMeta> findAll();
+    CommitMeta findLatest();
     List<Author> findAllAuthors();
     int count();
 }

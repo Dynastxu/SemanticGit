@@ -325,7 +325,8 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
 
 
     @Override
-    public CompletableFuture<Void> incrementalAnalysisAsync(String repoPath, File databaseFile, Consumer<Float> onProgress, Function<Throwable, Void> onError) {
+    public CompletableFuture<Void> incrementalAnalysisAsync(String repoPath, File databaseFile,
+            Consumer<Float> onProgress, Function<Throwable, Void> onError) {
         int hash = Objects.hash(repoPath, databaseFile);
         if (incrementalAnalysisFutures.containsKey(hash)) {
             if (incrementalAnalysisFutures.get(hash).isDone()) {
@@ -334,8 +335,121 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
                 return incrementalAnalysisFutures.get(hash);
             }
         }
-        // TODO 实现
-        return null;
+
+        CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
+            try {
+                runIncrementalAnalysis(repoPath, databaseFile, onProgress);
+            } catch (Exception e) {
+                throw new CompletionException(e);
+            }
+        }).exceptionally(e -> {
+            log.error("Incremental analysis failed", e);
+            if (onError != null) {
+                onError.apply(e);
+            }
+            return null;
+        }).whenComplete((_, _) -> incrementalAnalysisFutures.remove(hash));
+
+        incrementalAnalysisFutures.put(hash, future);
+        return future;
+    }
+
+    private void runIncrementalAnalysis(String repoPath, File databaseFile,
+            Consumer<Float> onProgress) throws Exception {
+        if (!databaseFile.exists()) {
+            throw new IllegalStateException(
+                    "Database file does not exist: " + databaseFile.getAbsolutePath()
+                            + ". Please run full analysis first.");
+        }
+
+        try (GitService gitService = new GitService(repoPath);
+             DatabaseManager dbManager = new DatabaseManager(databaseFile, false)) {
+
+            CommitMetaDao commitMetaDao = new CommitMetaDaoImpl(dbManager);
+            ChangeLogDao changeLogDao = new ChangeLogDaoImpl(dbManager);
+
+            CommitMeta latestInDb = commitMetaDao.findLatest();
+            if (latestInDb == null) {
+                throw new IllegalStateException(
+                        "Database is empty. Please run full analysis first.");
+            }
+
+            String latestHash = latestInDb.getHash();
+            String headHash = gitService.getHeadCommit();
+            if (headHash == null) {
+                log.info("HEAD is null, nothing to analyze");
+                if (onProgress != null) {
+                    onProgress.accept(1.0f);
+                }
+                return;
+            }
+
+            if (latestHash.equals(headHash)) {
+                log.info("Already up to date, no new commits");
+                if (onProgress != null) {
+                    onProgress.accept(1.0f);
+                }
+                return;
+            }
+
+            List<GitCommitInfo> newCommitInfos;
+            try {
+                newCommitInfos = gitService.getCommitsBetween(latestHash, headHash);
+            } catch (IllegalArgumentException e) {
+                throw new IllegalStateException(
+                        "Database commit " + latestHash.substring(0, 7)
+                                + " is not an ancestor of HEAD. A full re-analysis may be required.",
+                        e);
+            }
+
+            Set<String> existingHashes = commitMetaDao.findAll().stream()
+                    .map(CommitMeta::getHash)
+                    .collect(Collectors.toSet());
+
+            newCommitInfos = newCommitInfos.stream()
+                    .filter(info -> !existingHashes.contains(info.getCommitHash()))
+                    .toList();
+
+            if (newCommitInfos.isEmpty()) {
+                log.info("No new commits to analyze");
+                if (onProgress != null) {
+                    onProgress.accept(1.0f);
+                }
+                return;
+            }
+
+            log.info("Found {} new commits to analyze", newCommitInfos.size());
+
+            List<CommitMeta> newCommitMetas = newCommitInfos.stream()
+                    .map(info -> CommitMeta.builder()
+                            .hash(info.getCommitHash())
+                            .author(Author.builder()
+                                    .name(info.getAuthorName())
+                                    .email(info.getAuthorEmail())
+                                    .build())
+                            .timestamp((int) info.getTimestamp())
+                            .message(info.getFullMessage())
+                            .build())
+                    .toList();
+
+            commitMetaDao.saveAll(newCommitMetas);
+            saveRefs(gitService, dbManager, commitMetaDao);
+
+            for (int i = 0; i < newCommitInfos.size(); i++) {
+                GitCommitInfo info = newCommitInfos.get(i);
+                CommitMeta meta = newCommitMetas.get(i);
+
+                List<ChangeLog> changeLogs = analyzeDiff(info.getDiffEntries(), meta);
+                changeLogDao.saveAll(changeLogs);
+
+                if (onProgress != null) {
+                    onProgress.accept((float) (i + 1) / newCommitInfos.size());
+                }
+
+                log.info("Analyzed commit {}/{}: {} changes",
+                        i + 1, newCommitInfos.size(), changeLogs.size());
+            }
+        }
     }
 
     @Override
