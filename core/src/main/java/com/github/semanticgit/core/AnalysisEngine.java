@@ -20,8 +20,10 @@ import org.jspecify.annotations.NonNull;
 
 import java.io.File;
 import java.util.*;
+import java.util.Collections;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -183,13 +185,12 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
         List<ChangeLog> additions = changeLogs.stream()
                 .filter(c -> c.getOperation() == ChangeOperation.ADD).toList();
 
-        Set<ChangeLog> matched = new HashSet<>();
-        List<ChangeLog> result = new ArrayList<>();
+        Set<ChangeLog> matched = ConcurrentHashMap.newKeySet();
+        List<ChangeLog> result = Collections.synchronizedList(new ArrayList<>());
 
-        for (ChangeLog removed : removals) {
+        removals.parallelStream().forEach(removed -> {
             Entity removedEntity = removed.getEntity();
             for (ChangeLog added : additions) {
-                if (matched.contains(added)) continue;
                 if (removed.getFilePath().equals(added.getFilePath())) continue;
 
                 Entity addedEntity = added.getEntity();
@@ -198,8 +199,10 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
                 double similarity = computeStructuralSimilarity(removedEntity, addedEntity);
                 if (similarity < SIGNATURE_MATCH_THRESHOLD) continue;
 
+                if (!matched.add(added)) {
+                    continue;
+                }
                 matched.add(removed);
-                matched.add(added);
                 result.add(ChangeLog.builder()
                         .commit(added.getCommit())
                         .entity(addedEntity)
@@ -210,15 +213,14 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
                         .dataQuality(added.getDataQuality())
                         .analysisType(added.getAnalysisType())
                         .build());
-                break;
+                return;
             }
-        }
+        });
 
-        for (ChangeLog c : changeLogs) {
-            if (!matched.contains(c)) {
-                result.add(c);
-            }
-        }
+        changeLogs.stream()
+                .filter(c -> !matched.contains(c))
+                .forEach(result::add);
+
         return result;
     }
 
