@@ -5,7 +5,7 @@ SemanticGit 是一个语义级 Git 仓库分析工具。不同于传统的文本
 ## 特性
 
 - **语义级分析**：识别类、方法、函数等代码实体，追踪它们的增删改
-- **多语言支持**：内置 Java、C++、Python 解析器（目前仅实现 Java 解析）
+- **多语言支持**：内置 Java、~~C++~~、~~Python~~ 解析器（目前仅实现 Java 解析）
 - **全量历史分析**：遍历仓库全部提交，构建完整的实体变更时间线
 - **SQLite 持久化**：分析结果存入本地数据库，支持离线查询和统计
 - **命令行工具**：提供 `semgit analyze` 和 `semgit statistics` 子命令
@@ -13,17 +13,17 @@ SemanticGit 是一个语义级 Git 仓库分析工具。不同于传统的文本
 
 ## 模块结构
 
-| 模块            | 说明                                                   |
-|-----------------|--------------------------------------------------------|
-| `common`        | 公共实体定义（Entity, ChangeLog, CommitMeta 等）和配置 |
-| `parser:api`    | 语言解析器接口定义                                     |
-| `parser:java`   | Java 源码解析器实现                                    |
-| `parser:cpp`    | C++ 源码解析器实现                                     |
-| `parser:python` | Python 源码解析器实现                                  |
-| `git`           | 基于 JGit 的 Git 操作封装                              |
-| `core`          | 分析引擎、数据库管理、统计查询                         |
-| `cli`           | 基于 picocli 的命令行界面                              |
-| `ui`            | Compose Desktop 图形界面                               |
+| 模块                | 说明                                                   |
+|---------------------|--------------------------------------------------------|
+| `common`            | 公共实体定义（Entity, ChangeLog, CommitMeta 等）和配置 |
+| `parser:api`        | 语言解析器接口定义                                     |
+| `parser:java`       | Java 源码解析器实现                                    |
+| ~~`parser:cpp`~~    | ~~C++ 源码解析器实现~~（暂未实现）                     |
+| ~~`parser:python`~~ | ~~Python 源码解析器实现~~（暂未实现）                  |
+| `git`               | 基于 JGit 的 Git 操作封装                              |
+| `core`              | 分析引擎、数据库管理、统计查询                         |
+| `cli`               | 基于 picocli 的命令行界面                              |
+| `ui`                | Compose Desktop 图形界面                               |
 
 ## 快速开始
 
