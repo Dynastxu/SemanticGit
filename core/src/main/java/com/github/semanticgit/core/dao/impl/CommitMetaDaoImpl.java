@@ -8,7 +8,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.jdbi.v3.core.Handle;
 import org.jspecify.annotations.NonNull;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
@@ -150,6 +149,22 @@ public class CommitMetaDaoImpl implements CommitMetaDao {
         } catch (Exception e) {
             log.error("Failed to find all authors", e);
             return List.of();
+        }
+    }
+
+    @Override
+    public int count() {
+        try {
+            return dbManager.getJdbi().withHandle(handle -> {
+                Integer count = handle.createQuery("SELECT COUNT(*) FROM commit_meta")
+                        .mapTo(Integer.class)
+                        .one();
+                log.info("countCommits result: {}", count);
+                return count;
+            });
+        } catch (Exception e) {
+            log.error("Failed to count commits", e);
+            return 0;
         }
     }
 

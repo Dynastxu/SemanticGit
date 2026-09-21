@@ -11,4 +11,5 @@ public interface CommitMetaDao {
     CommitMeta findByHash(String hash);
     List<CommitMeta> findAll();
     List<Author> findAllAuthors();
+    int count();
 }
