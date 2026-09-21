@@ -25,6 +25,7 @@ import java.util.concurrent.CompletionException;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.eclipse.jgit.lib.Constants;
 
@@ -121,58 +122,57 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
     }
 
     private @NonNull List<ChangeLog> analyzeDiff(@NonNull List<GitDiffEntry> diffs, CommitMeta commit) {
-        List<ChangeLog> changeLogs = new ArrayList<>();
+        List<ChangeLog> changeLogs = diffs.parallelStream()
+                .flatMap(diff -> {
+                    String filePath = diff.getNewPath() != null ? diff.getNewPath() : diff.getOldPath();
+                    EntityLanguage language = ParserRegistry.detectLanguage(filePath);
 
-        for (GitDiffEntry diff : diffs) {
-            String filePath = diff.getNewPath() != null ? diff.getNewPath() : diff.getOldPath();
-            EntityLanguage language = ParserRegistry.detectLanguage(filePath);
-
-            if (language == null || !ParserRegistry.hasParser(language)) {
-                continue;
-            }
-
-            SourceCode beforeCode = buildSourceCode(filePath, diff.getOldContent(), language);
-            SourceCode afterCode = buildSourceCode(filePath, diff.getNewContent(), language);
-
-            LanguageParser parser = ParserRegistry.getParserInstance(language);
-            List<EntityChange> entityChanges = parser.parseChangeNatureFlags(beforeCode, afterCode);
-
-            for (EntityChange ec : entityChanges) {
-                Entity entity;
-                ChangeOperation operation;
-                Entity parentEntity = null;
-
-                if (ec.getBefore() == null) {
-                    entity = ec.getAfter();
-                    operation = ChangeOperation.ADD;
-                } else if (ec.getAfter() == null) {
-                    entity = ec.getBefore();
-                    operation = ChangeOperation.REMOVE;
-                } else {
-                    entity = ec.getAfter();
-                    operation = ChangeOperation.MODIFY;
-                    if (!ec.getBefore().getName().equals(ec.getAfter().getName())) {
-                        parentEntity = ec.getBefore();
+                    if (language == null || !ParserRegistry.hasParser(language)) {
+                        return Stream.empty();
                     }
-                }
 
-                entity.setLanguage(language);
+                    SourceCode beforeCode = buildSourceCode(filePath, diff.getOldContent(), language);
+                    SourceCode afterCode = buildSourceCode(filePath, diff.getNewContent(), language);
 
-                changeLogs.add(ChangeLog.builder()
-                        .commit(commit)
-                        .entity(entity)
-                        .filePath(filePath)
-                        .operation(operation)
-                        .natureFlagCode(ec.getFlags())
-                        .parentEntity(parentEntity)
-                        .dataQuality(DataQuality.AST)
-                        .analysisType(AnalysisType.INCREMENTAL)
-                        .build());
-            }
-        }
+                    LanguageParser parser = ParserRegistry.getParserInstance(language);
+                    List<EntityChange> entityChanges = parser.parseChangeNatureFlags(beforeCode, afterCode);
 
-        changeLogs = matchCrossFileRefactors(changeLogs);
-        return changeLogs;
+                    return entityChanges.stream().map(ec -> {
+                        Entity entity;
+                        ChangeOperation operation;
+                        Entity parentEntity = null;
+
+                        if (ec.getBefore() == null) {
+                            entity = ec.getAfter();
+                            operation = ChangeOperation.ADD;
+                        } else if (ec.getAfter() == null) {
+                            entity = ec.getBefore();
+                            operation = ChangeOperation.REMOVE;
+                        } else {
+                            entity = ec.getAfter();
+                            operation = ChangeOperation.MODIFY;
+                            if (!ec.getBefore().getName().equals(ec.getAfter().getName())) {
+                                parentEntity = ec.getBefore();
+                            }
+                        }
+
+                        entity.setLanguage(language);
+
+                        return ChangeLog.builder()
+                                .commit(commit)
+                                .entity(entity)
+                                .filePath(filePath)
+                                .operation(operation)
+                                .natureFlagCode(ec.getFlags())
+                                .parentEntity(parentEntity)
+                                .dataQuality(DataQuality.AST)
+                                .analysisType(AnalysisType.INCREMENTAL)
+                                .build();
+                    });
+                })
+                .collect(Collectors.toList());
+
+        return matchCrossFileRefactors(changeLogs);
     }
 
     private static final double SIGNATURE_MATCH_THRESHOLD = 0.7;
