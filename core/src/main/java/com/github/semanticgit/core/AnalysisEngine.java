@@ -24,6 +24,7 @@ import java.util.Collections;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -91,34 +92,40 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
             Map<String, CommitMeta> commitMetaMap = commits.stream()
                     .collect(Collectors.toMap(CommitMeta::getHash, c -> c));
 
-            List<GitCommitInfo> commitInfos;
-            if (firstHash.equals(lastHash)) {
-                GitCommitInfo info = gitService.getCommitInfo(firstHash);
-                commitInfos = Collections.singletonList(info);
-            } else {
-                commitInfos = gitService.getCommitsBetween(firstHash, lastHash);
-            }
-
             ChangeLogDao changeLogDao = new ChangeLogDaoImpl(dbManager);
 
-            for (int i = 0; i < commitInfos.size(); i++) {
-                GitCommitInfo info = commitInfos.get(i);
+            if (firstHash.equals(lastHash)) {
+                GitCommitInfo info = gitService.getCommitInfo(firstHash);
                 CommitMeta commitMeta = commitMetaMap.get(info.getCommitHash());
-                if (commitMeta == null) {
-                    log.warn("Commit {} not found in commit meta map",
-                            info.getCommitHash().substring(0, Math.min(7, info.getCommitHash().length())));
-                    continue;
+                if (commitMeta != null) {
+                    List<ChangeLog> changeLogs = analyzeDiff(info.getDiffEntries(), commitMeta);
+                    changeLogDao.saveAll(changeLogs);
+                    log.info("Analyzed commit 1/1: {} changes", changeLogs.size());
                 }
-
-                List<ChangeLog> changeLogs = analyzeDiff(info.getDiffEntries(), commitMeta);
-                changeLogDao.saveAll(changeLogs);
-
                 if (onProgress != null) {
-                    float progress = (float) (i + 1) / commitInfos.size();
-                    onProgress.accept(progress);
+                    onProgress.accept(1.0f);
                 }
+            } else {
+                int totalCommits = gitService.countCommitsBetween(firstHash, lastHash);
+                AtomicInteger processed = new AtomicInteger(0);
 
-                log.info("Analyzed commit {}/{}: {} changes", i + 1, commitInfos.size(), changeLogs.size());
+                gitService.forEachCommitBetween(firstHash, lastHash, info -> {
+                    CommitMeta commitMeta = commitMetaMap.get(info.getCommitHash());
+                    if (commitMeta == null) {
+                        log.warn("Commit {} not found in commit meta map",
+                                info.getCommitHash().substring(0, Math.min(7, info.getCommitHash().length())));
+                        return;
+                    }
+
+                    List<ChangeLog> changeLogs = analyzeDiff(info.getDiffEntries(), commitMeta);
+                    changeLogDao.saveAll(changeLogs);
+
+                    int cur = processed.incrementAndGet();
+                    if (onProgress != null) {
+                        onProgress.accept((float) cur / totalCommits);
+                    }
+                    log.info("Analyzed commit {}/{}: {} changes", cur, totalCommits, changeLogs.size());
+                });
             }
         }
     }
@@ -392,36 +399,20 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
                 return;
             }
 
-            List<GitCommitInfo> newCommitInfos;
-            try {
-                newCommitInfos = gitService.getCommitsBetween(latestHash, headHash);
-            } catch (IllegalArgumentException e) {
-                throw new IllegalStateException(
-                        "Database commit " + latestHash.substring(0, 7)
-                                + " is not an ancestor of HEAD. A full re-analysis may be required.",
-                        e);
-            }
-
             Set<String> existingHashes = commitMetaDao.findAll().stream()
                     .map(CommitMeta::getHash)
                     .collect(Collectors.toSet());
 
-            newCommitInfos = newCommitInfos.stream()
-                    .filter(info -> !existingHashes.contains(info.getCommitHash()))
-                    .toList();
+            int totalCommits = gitService.countCommitsBetween(latestHash, headHash);
+            AtomicInteger processed = new AtomicInteger(0);
 
-            if (newCommitInfos.isEmpty()) {
-                log.info("No new commits to analyze");
-                if (onProgress != null) {
-                    onProgress.accept(1.0f);
-                }
-                return;
-            }
+            try {
+                gitService.forEachCommitBetween(latestHash, headHash, info -> {
+                    if (existingHashes.contains(info.getCommitHash())) {
+                        return;
+                    }
 
-            log.info("Found {} new commits to analyze", newCommitInfos.size());
-
-            List<CommitMeta> newCommitMetas = newCommitInfos.stream()
-                    .map(info -> CommitMeta.builder()
+                    CommitMeta meta = CommitMeta.builder()
                             .hash(info.getCommitHash())
                             .author(Author.builder()
                                     .name(info.getAuthorName())
@@ -429,26 +420,35 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
                                     .build())
                             .timestamp((int) info.getTimestamp())
                             .message(info.getFullMessage())
-                            .build())
-                    .toList();
+                            .build();
+                    commitMetaDao.save(meta);
 
-            commitMetaDao.saveAll(newCommitMetas);
-            saveRefs(gitService, dbManager, commitMetaDao);
+                    List<ChangeLog> changeLogs = analyzeDiff(info.getDiffEntries(), meta);
+                    changeLogDao.saveAll(changeLogs);
 
-            for (int i = 0; i < newCommitInfos.size(); i++) {
-                GitCommitInfo info = newCommitInfos.get(i);
-                CommitMeta meta = newCommitMetas.get(i);
-
-                List<ChangeLog> changeLogs = analyzeDiff(info.getDiffEntries(), meta);
-                changeLogDao.saveAll(changeLogs);
-
-                if (onProgress != null) {
-                    onProgress.accept((float) (i + 1) / newCommitInfos.size());
-                }
-
-                log.info("Analyzed commit {}/{}: {} changes",
-                        i + 1, newCommitInfos.size(), changeLogs.size());
+                    int cur = processed.incrementAndGet();
+                    if (onProgress != null) {
+                        onProgress.accept((float) cur / totalCommits);
+                    }
+                    log.info("Analyzed commit {}/{}: {} changes",
+                            cur, totalCommits, changeLogs.size());
+                });
+            } catch (IllegalArgumentException e) {
+                throw new IllegalStateException(
+                        "Database commit " + latestHash.substring(0, 7)
+                                + " is not an ancestor of HEAD. A full re-analysis may be required.",
+                        e);
             }
+
+            if (processed.get() == 0) {
+                log.info("No new commits to analyze");
+                if (onProgress != null) {
+                    onProgress.accept(1.0f);
+                }
+                return;
+            }
+
+            saveRefs(gitService, dbManager, commitMetaDao);
         }
     }
 

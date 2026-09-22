@@ -32,9 +32,10 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 
-public class GitService implements AutoCloseable {
+public class GitService implements AutoCloseable, IGitService {
 
     private static final int BINARY_SNIFF_LEN = 8000;
     private static final long MAX_FILE_CONTENT_BYTES = 5L * 1024 * 1024;
@@ -239,6 +240,17 @@ public class GitService implements AutoCloseable {
         try (RevWalk walk = new RevWalk(repository)) {
             return buildCommitInfo(walk.parseCommit(commitId), walk);
         }
+    }
+
+    @Override
+    public int countCommitsBetween(String fromRef, String toRef) throws IOException {
+        // TODO 实现
+        return 0;
+    }
+
+    @Override
+    public void forEachCommitBetween(String fromRef, String toRef, Consumer<GitCommitInfo> consumer) throws IOException {
+        // TODO 实现
     }
 
     /**
