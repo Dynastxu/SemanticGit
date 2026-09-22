@@ -33,11 +33,6 @@ import org.eclipse.jgit.lib.Constants;
 
 @Slf4j
 public class AnalysisEngine extends AbstractAnalysisEngine {
-    @Override
-    @Deprecated(forRemoval = true)
-    public boolean fullAnalysis(String repoPath, String databaseDir) {
-        return false;
-    }
 
     @Override
     public CompletableFuture<Void> fullAnalysisAsync(String repoPath, String databaseDir, String databaseName, Consumer<Float> onProgress, Function<Throwable, Void> onError) {
@@ -452,7 +447,6 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
         }
     }
 
-    @Override
     @Deprecated(forRemoval = true)
     public boolean isDatabaseExists(String repoPath, String databaseDir) {
         String dbName = Integer.toHexString(new File(repoPath).getAbsolutePath().hashCode());
