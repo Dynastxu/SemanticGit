@@ -1,24 +1,27 @@
 package com.github.semanticgit.core;
 
-import com.github.semanticgit.common.entity.ChangeNatureFlag;
-import com.github.semanticgit.common.entity.ChangeOperation;
+import com.github.semanticgit.common.entity.*;
 import com.github.semanticgit.core.dao.ChangeLogDao;
 import com.github.semanticgit.core.dao.CommitMetaDao;
 import com.github.semanticgit.core.dao.impl.ChangeLogDaoImpl;
 import com.github.semanticgit.core.dao.impl.CommitMetaDaoImpl;
 import com.github.semanticgit.core.db.DatabaseManager;
+import com.github.semanticgit.core.dto.AuthorChangeStatistics;
 import com.github.semanticgit.core.dto.CommitEntityChangeStatistics;
 import com.github.semanticgit.core.dto.EntityChangeHistory;
 import com.github.semanticgit.core.dto.SimpleEntityChangeStatistics;
+import com.github.semanticgit.core.dto.StatRow;
 import lombok.extern.slf4j.Slf4j;
+import org.jspecify.annotations.Nullable;
 
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Statement;
 import java.util.EnumMap;
 import java.util.EnumSet;
+import java.util.List;
 import java.util.Map;
 
+/**
+ * @see com.github.semanticgit.core.AbstractStatisticsProvider
+ */
 @Slf4j
 public class StatisticsProvider extends AbstractStatisticsProvider {
     private final DatabaseManager dbManager;
@@ -29,48 +32,26 @@ public class StatisticsProvider extends AbstractStatisticsProvider {
 
     @Override
     public SimpleEntityChangeStatistics getSimpleEntityChangeStatistics() {
+        CommitMetaDao commitMetaDao = new CommitMetaDaoImpl(dbManager);
         ChangeLogDao changeLogDao = new ChangeLogDaoImpl(dbManager);
 
-        int totalCommits = countCommits();
+        int totalCommits = commitMetaDao.count();
         log.info("Total commits from commit_meta: {}", totalCommits);
 
-        try(ResultSet rs = changeLogDao.querySimpleEntityChangeStatistics()) {
-            Map<ChangeOperation, Float> operationFloatMap = new EnumMap<>(ChangeOperation.class);
-            Map<ChangeNatureFlag, Float> natureFlagFloatMap = new EnumMap<>(ChangeNatureFlag.class);
+        try {
+            List<StatRow> rows = changeLogDao.querySimpleEntityChangeStatistics();
+            StatMaps maps = parseStatRows(rows);
 
-            int rowCount = 0;
-            while (rs.next()) {
-                rowCount++;
-                int code = rs.getInt("value");
-                float opRatio = rs.getFloat("operation_ratio");
-                float nfRatio = rs.getFloat("nature_flag_ratio");
-
-                log.info("Row {}: code={}, opRatio={}, nfRatio={}", rowCount, code, opRatio, nfRatio);
-
-                if (opRatio > 0 && ChangeOperation.hasCode(code)) {
-                    ChangeOperation op = ChangeOperation.fromCode(code);
-                    operationFloatMap.put(op, opRatio);
-                }
-
-                if (nfRatio > 0) {
-                    EnumSet<ChangeNatureFlag> nf = ChangeNatureFlag.fromCode(code);
-                    for (ChangeNatureFlag flag : nf) {
-                        natureFlagFloatMap.merge(flag, nfRatio, Float::sum);
-                    }
-                }
-            }
-
-            log.info("Query returned {} rows", rowCount);
-            log.info("operationFloatMap: {}", operationFloatMap);
-            log.info("natureFlagFloatMap: {}", natureFlagFloatMap);
+            log.info("Query returned {} rows", rows.size());
+            log.info("operationFloatMap: {}", maps.operationFloatMap());
+            log.info("natureFlagFloatMap: {}", maps.natureFlagFloatMap());
 
             return SimpleEntityChangeStatistics.builder()
                     .totalCommits(totalCommits)
-                    .operationFloatMap(operationFloatMap)
-                    .natureFlagFloatMap(natureFlagFloatMap)
+                    .operationFloatMap(maps.operationFloatMap())
+                    .natureFlagFloatMap(maps.natureFlagFloatMap())
                     .build();
-
-        } catch (SQLException e) {
+        } catch (Exception e) {
             log.error("Failed to get simple entity change statistics", e);
             return SimpleEntityChangeStatistics.fail();
         }
@@ -88,35 +69,15 @@ public class StatisticsProvider extends AbstractStatisticsProvider {
                 return null;
             }
 
-            try (ResultSet rs = changeLogDao.queryCommitEntityChangeStatistics(hash)) {
-                Map<ChangeOperation, Float> operationFloatMap = new EnumMap<>(ChangeOperation.class);
-                Map<ChangeNatureFlag, Float> natureFlagFloatMap = new EnumMap<>(ChangeNatureFlag.class);
+            List<StatRow> rows = changeLogDao.queryCommitEntityChangeStatistics(hash);
+            StatMaps maps = parseStatRows(rows);
 
-                while (rs.next()) {
-                    int code = rs.getInt("value");
-                    float opRatio = rs.getFloat("operation_ratio");
-                    float nfRatio = rs.getFloat("nature_flag_ratio");
-
-                    if (opRatio > 0 && ChangeOperation.hasCode(code)) {
-                        ChangeOperation op = ChangeOperation.fromCode(code);
-                        operationFloatMap.put(op, opRatio);
-                    }
-
-                    if (nfRatio > 0) {
-                        EnumSet<ChangeNatureFlag> nf = ChangeNatureFlag.fromCode(code);
-                        for (ChangeNatureFlag flag : nf) {
-                            natureFlagFloatMap.merge(flag, nfRatio, Float::sum);
-                        }
-                    }
-                }
-
-                return CommitEntityChangeStatistics.builder()
-                        .commitMeta(commitMeta)
-                        .operationFloatMap(operationFloatMap)
-                        .natureFlagFloatMap(natureFlagFloatMap)
-                        .build();
-            }
-        } catch (SQLException e) {
+            return CommitEntityChangeStatistics.builder()
+                    .commitMeta(commitMeta)
+                    .operationFloatMap(maps.operationFloatMap())
+                    .natureFlagFloatMap(maps.natureFlagFloatMap())
+                    .build();
+        } catch (Exception e) {
             log.error("Failed to get commit entity change statistics for hash: {}", hash, e);
             return null;
         }
@@ -128,17 +89,57 @@ public class StatisticsProvider extends AbstractStatisticsProvider {
         return changeLogDao.queryEntityChangeHistory(entityName, refName);
     }
 
-    private int countCommits() {
-        try (Statement stmt = dbManager.getConnection().createStatement();
-             ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM commit_meta")) {
-            if (rs.next()) {
-                int count = rs.getInt(1);
-                log.info("countCommits result: {}", count);
-                return count;
+    @Override
+    public AuthorChangeStatistics getAuthorChangeStatistics(Author author, @Nullable String refName) {
+        ChangeLogDao changeLogDao = new ChangeLogDaoImpl(dbManager);
+        return changeLogDao.queryAuthorChangeStatistics(author, refName);
+    }
+
+    @Override
+    public List<Author> getAuthors() {
+        CommitMetaDao commitMetaDao = new CommitMetaDaoImpl(dbManager);
+        return commitMetaDao.findAllAuthors();
+    }
+
+    @Override
+    public List<Entity> getEntities() {
+        ChangeLogDao changeLogDao = new ChangeLogDaoImpl(dbManager);
+        return changeLogDao.findAllEntities();
+    }
+
+    @Override
+    public List<CommitMeta> getCommits() {
+        CommitMetaDao commitMetaDao = new CommitMetaDaoImpl(dbManager);
+        return commitMetaDao.findAll();
+    }
+
+    private record StatMaps(
+        Map<ChangeOperation, Float> operationFloatMap,
+        Map<ChangeNatureFlag, Float> natureFlagFloatMap
+    ) {}
+
+    private StatMaps parseStatRows(List<StatRow> rows) {
+        Map<ChangeOperation, Float> operationFloatMap = new EnumMap<>(ChangeOperation.class);
+        Map<ChangeNatureFlag, Float> natureFlagFloatMap = new EnumMap<>(ChangeNatureFlag.class);
+
+        for (StatRow row : rows) {
+            int code = row.value();
+            float opRatio = row.operationRatio();
+            float nfRatio = row.natureFlagRatio();
+
+            if (opRatio > 0 && ChangeOperation.hasCode(code)) {
+                ChangeOperation op = ChangeOperation.fromCode(code);
+                operationFloatMap.put(op, opRatio);
             }
-        } catch (SQLException e) {
-            log.error("Failed to count commits", e);
+
+            if (nfRatio > 0) {
+                EnumSet<ChangeNatureFlag> nf = ChangeNatureFlag.fromCode(code);
+                for (ChangeNatureFlag flag : nf) {
+                    natureFlagFloatMap.merge(flag, nfRatio, Float::sum);
+                }
+            }
         }
-        return 0;
+
+        return new StatMaps(operationFloatMap, natureFlagFloatMap);
     }
 }
