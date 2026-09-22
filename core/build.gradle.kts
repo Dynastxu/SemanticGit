@@ -1,13 +1,13 @@
 plugins {
-    kotlin("jvm") version "2.3.20"
-    kotlin("plugin.lombok")
+    alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.kotlin.lombok)
 }
 dependencies {
     api(project(":parser:java"))
     api(project(":git"))
-    implementation("org.jdbi:jdbi3-core:${property("jdbi3Version")}")
-    implementation("org.xerial:sqlite-jdbc:${property("sqliteVersion")}")
-    testImplementation(kotlin("test"))
+    implementation(libs.jdbi3.core)
+    implementation(libs.sqlite.jdbc)
+    testImplementation(libs.kotlin.test)
 }
 repositories {
     mavenCentral()
