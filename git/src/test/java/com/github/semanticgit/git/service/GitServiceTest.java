@@ -10,6 +10,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -495,6 +496,100 @@ class GitServiceTest {
             GitDiffEntry e = byNewPath(service().getDiffBetweenCommits(c1, c2)).get("big.txt");
             assertNotNull(e);
             assertNull(e.getNewContent());
+        }
+    }
+    @Nested
+    @DisplayName("countCommitsBetween / forEachCommitBetween")
+    class CountAndForEach {
+
+        @Test
+        @DisplayName("count 应返回正确数量")
+        void count() throws Exception {
+            String c1 = repo.commitFile("a.txt", "A", "first");
+            repo.commitFile("b.txt", "B", "second");
+            repo.commitFile("c.txt", "C", "third");
+            String c4 = repo.commitFile("d.txt", "D", "fourth");
+
+            assertEquals(3, service().countCommitsBetween(c1, c4));
+        }
+
+        @Test
+        @DisplayName("from == to 时 count 为 0")
+        void countSameHash() throws Exception {
+            String h = repo.commitFile("test.txt", "test", "init");
+            assertEquals(0, service().countCommitsBetween(h, h));
+        }
+
+        @Test
+        @DisplayName("count 与 getCommitsBetween().size() 一致")
+        void countMatchesList() throws Exception {
+            String c1 = repo.commitFile("a.txt", "A", "first");
+            repo.commitFile("b.txt", "B", "second");
+            String c3 = repo.commitFile("c.txt", "C", "third");
+
+            GitService s = service();
+            assertEquals(s.getCommitsBetween(c1, c3).size(),
+                    s.countCommitsBetween(c1, c3));
+        }
+
+        @Test
+        @DisplayName("forEach 应按时间倒序逐个回调")
+        void forEachOrder() throws Exception {
+            String c1 = repo.commitFile("a.txt", "A", "first");
+            String c2 = repo.commitFile("b.txt", "B", "second");
+            String c3 = repo.commitFile("c.txt", "C", "third");
+
+            List<String> hashes = new ArrayList<>();
+            service().forEachCommitBetween(c1, c3, info -> hashes.add(info.getCommitHash()));
+
+            assertEquals(List.of(c3, c2), hashes);
+        }
+
+        @Test
+        @DisplayName("forEach 与 getCommitsBetween 结果一致")
+        void forEachMatchesList() throws Exception {
+            String c1 = repo.commitFile("a.txt", "A", "first");
+            repo.commitFile("b.txt", "B", "second");
+            String c3 = repo.commitFile("c.txt", "C", "third");
+
+            GitService s = service();
+            List<String> fromList = s.getCommitsBetween(c1, c3).stream()
+                    .map(GitCommitInfo::getCommitHash)
+                    .toList();
+
+            List<String> fromForEach = new ArrayList<>();
+            s.forEachCommitBetween(c1, c3, info -> fromForEach.add(info.getCommitHash()));
+
+            assertEquals(fromList, fromForEach);
+        }
+
+        @Test
+        @DisplayName("非祖先关系应抛异常")
+        void notAncestor() throws Exception {
+            repo.commitFile("a.txt", "A", "first");
+            repo.raw().checkout().setCreateBranch(true).setName("feature").call();
+            String featureTip = repo.commitFile("b.txt", "B", "feature");
+            repo.raw().checkout().setName(service().getDefaultBranch()).call();
+            String mainTip = repo.commitFile("c.txt", "C", "main");
+
+            assertAll(
+                    () -> assertThrows(IllegalArgumentException.class,
+                            () -> service().countCommitsBetween(mainTip, featureTip)),
+                    () -> assertThrows(IllegalArgumentException.class,
+                            () -> service().forEachCommitBetween(mainTip, featureTip, info -> {}))
+            );
+        }
+
+        @Test
+        @DisplayName("无效 ref 应抛异常")
+        void invalidRef() throws Exception {
+            String h = repo.commitFile("test.txt", "test", "init");
+            assertAll(
+                    () -> assertThrows(IllegalArgumentException.class,
+                            () -> service().countCommitsBetween(h, "deadbeef")),
+                    () -> assertThrows(IllegalArgumentException.class,
+                            () -> service().forEachCommitBetween("deadbeef", h, info -> {}))
+            );
         }
     }
 }

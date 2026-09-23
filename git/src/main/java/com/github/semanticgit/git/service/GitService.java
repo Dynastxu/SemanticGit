@@ -32,6 +32,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 
 public class GitService implements AutoCloseable {
@@ -302,6 +303,92 @@ public class GitService implements AutoCloseable {
             }
         }
         return result;
+    }
+
+    // ==================== count / forEach ====================
+
+    /**
+     * 统计两个 ref 之间的提交数量（不含 fromRef，含 toRef）。
+     * 要求 fromRef 是 toRef 的祖先，否则抛异常。
+     *
+     * <p>只遍历计数，不计算 diff、不构建 DTO，
+     * 比 {@code getCommitsBetween(a, b).size()} 快一个数量级。
+     *
+     * @param fromRef 起始 ref（不含）
+     * @param toRef   结束 ref（含）
+     * @return 提交数量
+     * @throws IOException               IO 失败
+     * @throws IllegalArgumentException  ref 无法解析，或 fromRef 不是 toRef 的祖先
+     */
+    public int countCommitsBetween(String fromRef, String toRef) throws IOException {
+        ObjectId fromId = repository.resolve(fromRef);
+        ObjectId toId = repository.resolve(toRef);
+        if (fromId == null || toId == null) {
+            throw new IllegalArgumentException(
+                    "Unresolvable ref: " + (fromId == null ? fromRef : toRef));
+        }
+
+        try (RevWalk checkWalk = new RevWalk(repository)) {
+            RevCommit from = checkWalk.parseCommit(fromId);
+            RevCommit to = checkWalk.parseCommit(toId);
+            if (!checkWalk.isMergedInto(from, to)) {
+                throw new IllegalArgumentException(
+                        fromRef + " is not an ancestor of " + toRef);
+            }
+        }
+
+        int count = 0;
+        try (RevWalk walk = new RevWalk(repository)) {
+            RevCommit from = walk.parseCommit(fromId);
+            RevCommit to = walk.parseCommit(toId);
+            walk.markStart(to);
+            walk.markUninteresting(from);
+            for (RevCommit ignored : walk) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
+     * 遍历两个 ref 之间的所有提交（不含 fromRef，含 toRef），时间倒序。
+     * 要求 fromRef 是 toRef 的祖先，否则抛异常。
+     *
+     * <p>流式处理，不累积列表；consumer 抛异常会中断遍历并向上传播。
+     *
+     * @param fromRef  起始 ref（不含）
+     * @param toRef    结束 ref（含）
+     * @param consumer 每个提交信息的消费函数
+     * @throws IOException               IO 失败
+     * @throws IllegalArgumentException  ref 无法解析，或 fromRef 不是 toRef 的祖先
+     */
+    public void forEachCommitBetween(String fromRef, String toRef,
+                                     Consumer<GitCommitInfo> consumer) throws IOException {
+        ObjectId fromId = repository.resolve(fromRef);
+        ObjectId toId = repository.resolve(toRef);
+        if (fromId == null || toId == null) {
+            throw new IllegalArgumentException(
+                    "Unresolvable ref: " + (fromId == null ? fromRef : toRef));
+        }
+
+        try (RevWalk checkWalk = new RevWalk(repository)) {
+            RevCommit from = checkWalk.parseCommit(fromId);
+            RevCommit to = checkWalk.parseCommit(toId);
+            if (!checkWalk.isMergedInto(from, to)) {
+                throw new IllegalArgumentException(
+                        fromRef + " is not an ancestor of " + toRef);
+            }
+        }
+
+        try (RevWalk walk = new RevWalk(repository)) {
+            RevCommit from = walk.parseCommit(fromId);
+            RevCommit to = walk.parseCommit(toId);
+            walk.markStart(to);
+            walk.markUninteresting(from);
+            for (RevCommit rev : walk) {
+                consumer.accept(buildCommitInfo(rev, walk));
+            }
+        }
     }
 
     // ==================== 内部 ====================
