@@ -74,12 +74,15 @@ data class ParserSettings(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RepoPage(modifier: Modifier = Modifier) {
+fun RepoPage(
+    modifier: Modifier = Modifier,
+    repoPaths: MutableList<String>,
+    selectedIndex: Int,
+    onSelectedRepoIndexChanged: (Int) -> Unit
+) {
     val strings = LocalStrings.current
     val scope = rememberCoroutineScope()
 
-    val repoPaths = remember { mutableStateListOf<String>() }
-    var selectedIndex by remember { mutableStateOf(-1) }
     var dropdownExpanded by remember { mutableStateOf(false) }
 
     val displayNames = remember(repoPaths.toList()) {
@@ -105,7 +108,7 @@ fun RepoPage(modifier: Modifier = Modifier) {
         maxRegexSizeMb = maxRegexSizeMbText.toLongOrNull() ?: 2L
     )
 
-    fun startAnalysis(forceReanalyze: Boolean = false) {
+    fun startAnalysis(forceReanalyze: Boolean = true) {
         val path = selectedPath ?: return
         
         scope.launch {
@@ -176,7 +179,7 @@ fun RepoPage(modifier: Modifier = Modifier) {
                         DropdownMenuItem(
                             text = { Text(displayNames[index]) },
                             onClick = {
-                                selectedIndex = index
+                                onSelectedRepoIndexChanged(index)
                                 dropdownExpanded = false
                                 showResult = false
                                 statistics = null       // 切仓库时清空
@@ -197,10 +200,10 @@ fun RepoPage(modifier: Modifier = Modifier) {
                     val newPath = chooser.selectedFile.absolutePath
                     val existingIndex = repoPaths.indexOf(newPath)
                     if (existingIndex >= 0) {
-                        selectedIndex = existingIndex
+                        onSelectedRepoIndexChanged(existingIndex)
                     } else {
                         repoPaths.add(newPath)
-                        selectedIndex = repoPaths.size - 1
+                        onSelectedRepoIndexChanged(repoPaths.size - 1)
                     }
                     showResult = false
                     statistics = null       // 切仓库时清空
@@ -582,11 +585,6 @@ sealed class AnalysisResult {
  * 1. 调用 AnalysisEngine 执行分析（如需要）
  * 2. 通过 StatisticsProvider 查询结果
  * 3. 返回统一的结果类型
- *
- * 特点：
- * - 纯业务逻辑，无 UI 依赖
- * - 可独立测试（通过 mock core 模块）
- * - 异常安全，返回 Error 而非抛出异常
  */
 private suspend fun executeCoreAnalysis(
     repoPath: String, 
@@ -599,11 +597,12 @@ private suspend fun executeCoreAnalysis(
             val engine = AnalysisEngine()
             val dbName = Integer.toHexString(File(repoPath).absolutePath.hashCode())
 
-            // ✅ 关键：分析前配置 ParserRegistry
+            //分析前配置 ParserRegistry
             settings?.let { applyParserConfigs(it) }
 
-            // 判断是否需要执行全量分析
-            val needAnalyze = forceReanalyze || !engine.isDatabaseExists(repoPath, dbDir)
+            // 判断是否需要执行全量分析（直接检查数据库文件是否存在）
+            val dbFile = java.io.File(dbDir, "$dbName.db")
+            val needAnalyze = forceReanalyze || !dbFile.exists()
             
             if (needAnalyze) {
                 if (forceReanalyze) {
