@@ -80,6 +80,9 @@ public class GitService implements AutoCloseable {
 
     /**
      * 按分支取提交列表（时间倒序，最新在前）。
+     * <p><b>只沿 first-parent 链遍历</b>：merge commit 引入的 feature 分支提交
+     * 不会出现在结果中。适用于"主线演进"视角。
+     *
      * @param branch 短名（"main"）、完整 ref（"refs/heads/main"）或 null（等价 HEAD）
      */
     public List<CommitMeta> getAllCommits(String branch) throws IOException {
@@ -93,6 +96,7 @@ public class GitService implements AutoCloseable {
         Map<String, Author> authorCache = new HashMap<>();
 
         try (RevWalk walk = new RevWalk(repository)) {
+            walk.setFirstParent(true);                    // ← 新增
             walk.markStart(walk.parseCommit(headId));
             for (RevCommit rev : walk) {
                 PersonIdent ident = rev.getAuthorIdent();
@@ -269,8 +273,9 @@ public class GitService implements AutoCloseable {
     // ==================== getCommitsBetween ====================
 
     /**
-     * fromRef（不含）到 toRef（含）之间的逐提交列表。
+     * fromRef（不含）到 toRef（含）之间的逐提交列表，<b>只走 first-parent 链</b>。
      * 要求 fromRef 是 toRef 的祖先，否则抛异常。
+     * <p>merge commit 引入的 feature 分支提交不会出现在结果中。
      */
     public List<GitCommitInfo> getCommitsBetween(String fromRef, String toRef)
             throws IOException, IllegalArgumentException {
@@ -294,6 +299,7 @@ public class GitService implements AutoCloseable {
         // 2) 遍历用新的 RevWalk
         List<GitCommitInfo> result = new ArrayList<>();
         try (RevWalk walk = new RevWalk(repository)) {
+            walk.setFirstParent(true);                    // ← 新增
             RevCommit from = walk.parseCommit(fromId);
             RevCommit to = walk.parseCommit(toId);
             walk.markStart(to);
@@ -339,6 +345,7 @@ public class GitService implements AutoCloseable {
 
         int count = 0;
         try (RevWalk walk = new RevWalk(repository)) {
+            walk.setFirstParent(true);                    // ← 新增
             RevCommit from = walk.parseCommit(fromId);
             RevCommit to = walk.parseCommit(toId);
             walk.markStart(to);
@@ -381,6 +388,7 @@ public class GitService implements AutoCloseable {
         }
 
         try (RevWalk walk = new RevWalk(repository)) {
+            walk.setFirstParent(true);                    // ← 新增
             RevCommit from = walk.parseCommit(fromId);
             RevCommit to = walk.parseCommit(toId);
             walk.markStart(to);

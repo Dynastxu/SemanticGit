@@ -592,4 +592,79 @@ class GitServiceTest {
             );
         }
     }
+    @Nested
+    @DisplayName("First-Parent 遍历")
+    class FirstParent {
+
+        /**
+         * 构造分叉 + merge：
+         *   main:    A ── C ── M
+         *                        /
+         *   feature:            B
+         */
+        private String[] buildMergeScenario() throws Exception {
+            repo.commitFile("a.txt", "A", "commit A");
+            String hashA = repo.head();
+
+            String defaultBranch = service().getDefaultBranch();
+
+            repo.raw().checkout().setCreateBranch(true).setName("feature").call();
+            repo.commitFile("b.txt", "B", "commit B");
+            String hashB = repo.head();
+
+            repo.raw().checkout().setName(defaultBranch).call();
+            repo.commitFile("c.txt", "C", "commit C");
+            String hashC = repo.head();
+
+            repo.raw().merge()
+                    .include(repo.raw().getRepository().resolve("feature"))
+                    .setCommit(true)
+                    .setMessage("merge feature")
+                    .call();
+            String hashM = repo.head();
+
+            return new String[]{hashA, hashB, hashC, hashM};
+        }
+
+        @Test
+        @DisplayName("getAllCommits 应排除 feature 分支的提交")
+        void allCommitsExcludesFeature() throws Exception {
+            String[] h = buildMergeScenario();
+            List<String> actual = service().getAllCommits().stream()
+                    .map(CommitMeta::getHash).toList();
+
+            assertEquals(List.of(h[3], h[2], h[0]), actual);
+            assertFalse(actual.contains(h[1]), "feature 分支的 B 不应出现");
+        }
+
+        @Test
+        @DisplayName("getCommitsBetween 应排除 feature 分支的提交")
+        void commitsBetweenExcludesFeature() throws Exception {
+            String[] h = buildMergeScenario();
+            List<String> actual = service().getCommitsBetween(h[0], h[3]).stream()
+                    .map(GitCommitInfo::getCommitHash).toList();
+
+            assertEquals(List.of(h[3], h[2]), actual);
+            assertFalse(actual.contains(h[1]));
+        }
+
+        @Test
+        @DisplayName("countCommitsBetween 应只数 first-parent 链上的提交")
+        void countExcludesFeature() throws Exception {
+            String[] h = buildMergeScenario();
+            assertEquals(2, service().countCommitsBetween(h[0], h[3]));
+        }
+
+        @Test
+        @DisplayName("forEachCommitBetween 应只遍历 first-parent 链")
+        void forEachExcludesFeature() throws Exception {
+            String[] h = buildMergeScenario();
+            List<String> collected = new ArrayList<>();
+            service().forEachCommitBetween(h[0], h[3],
+                    info -> collected.add(info.getCommitHash()));
+
+            assertEquals(List.of(h[3], h[2]), collected);
+            assertFalse(collected.contains(h[1]));
+        }
+    }
 }
