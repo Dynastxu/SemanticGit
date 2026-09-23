@@ -125,8 +125,8 @@ class AnalysisEngineFullAnalysisTest {
     }
 
     @Test
-    @DisplayName("matchCrossFileRefactors: 同文件内的 REMOVE+ADD → 不匹配")
-    void sameFile_NotMatched() {
+    @DisplayName("matchCrossFileRefactors: 同文件内相同签名的 REMOVE+ADD → 匹配为 REFACTOR")
+    void sameFile_SameSignature_Matched() {
         String sig = "void::0";
         List<ChangeLog> input = new ArrayList<>();
         input.add(removal("Same.java", methodEntity("com.foo.Same#m()", sig), 0));
@@ -134,9 +134,28 @@ class AnalysisEngineFullAnalysisTest {
 
         List<ChangeLog> result = engine.matchCrossFileRefactors(input);
 
-        assertEquals(2, result.size());
-        assertTrue(result.stream().anyMatch(c -> c.getOperation() == ChangeOperation.REMOVE));
-        assertTrue(result.stream().anyMatch(c -> c.getOperation() == ChangeOperation.ADD));
+        assertEquals(1, result.size());
+        ChangeLog matched = result.getFirst();
+        assertEquals(ChangeOperation.MODIFY, matched.getOperation());
+        assertEquals(ChangeNatureFlag.REFACTOR.code, matched.getNatureFlagCode());
+    }
+
+    @Test
+    @DisplayName("matchCrossFileRefactors: 同文件内相同签名但不同名称 → 重命名检测为 REFACTOR")
+    void sameFile_Rename_Matched() {
+        String sig = "int:int:a1b2c3";
+        List<ChangeLog> input = new ArrayList<>();
+        input.add(removal("Foo.java", methodEntity("com.foo.Foo#calculate(int)", sig), ChangeNatureFlag.FEAT.code));
+        input.add(addition("Foo.java", methodEntity("com.foo.Foo#compute(int)", sig), ChangeNatureFlag.FEAT.code));
+
+        List<ChangeLog> result = engine.matchCrossFileRefactors(input);
+
+        assertEquals(1, result.size());
+        ChangeLog matched = result.getFirst();
+        assertEquals(ChangeOperation.MODIFY, matched.getOperation());
+        assertEquals("com.foo.Foo#compute(int)", matched.getEntity().getName());
+        assertEquals("com.foo.Foo#calculate(int)", matched.getParentEntity().getName());
+        assertEquals(ChangeNatureFlag.FEAT.code | ChangeNatureFlag.REFACTOR.code, matched.getNatureFlagCode());
     }
 
     @Test

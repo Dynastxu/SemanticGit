@@ -172,7 +172,7 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
         return matchCrossFileRefactors(changeLogs);
     }
 
-    private static final double SIGNATURE_MATCH_THRESHOLD = 0.7;
+    private static final double SIGNATURE_MATCH_THRESHOLD = 0.7; // TODO 改为配置项？
 
     @NonNull List<ChangeLog> matchCrossFileRefactors(@NonNull List<ChangeLog> changeLogs) {
         List<ChangeLog> removals = changeLogs.stream()
@@ -186,8 +186,6 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
         removals.parallelStream().forEach(removed -> {
             Entity removedEntity = removed.getEntity();
             for (ChangeLog added : additions) {
-                if (removed.getFilePath().equals(added.getFilePath())) continue;
-
                 Entity addedEntity = added.getEntity();
                 if (removedEntity.getKind() != addedEntity.getKind()) continue;
 
