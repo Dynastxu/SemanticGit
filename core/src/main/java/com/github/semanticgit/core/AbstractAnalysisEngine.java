@@ -2,7 +2,6 @@ package com.github.semanticgit.core;
 
 import java.io.File;
 import java.util.Map;
-import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;

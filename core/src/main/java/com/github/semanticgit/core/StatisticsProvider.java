@@ -20,10 +20,10 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * @see com.github.semanticgit.core.AbstractStatisticsProvider
+ * @see IStatisticsProvider
  */
 @Slf4j
-public class StatisticsProvider extends AbstractStatisticsProvider {
+public class StatisticsProvider implements IStatisticsProvider {
     private final DatabaseManager dbManager;
 
     public StatisticsProvider(DatabaseManager dbManager) {
