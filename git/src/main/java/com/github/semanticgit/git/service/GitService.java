@@ -246,16 +246,7 @@ public class GitService implements AutoCloseable, IGitService {
         }
     }
 
-    @Override
-    public int countCommitsBetween(String fromRef, String toRef) throws IOException {
-        // TODO 实现
-        return 0;
-    }
 
-    @Override
-    public void forEachCommitBetween(String fromRef, String toRef, Consumer<GitCommitInfo> consumer) throws IOException {
-        // TODO 实现
-    }
 
     /**
      * 计算某提交相对其所有父提交的 diff。root 返回空 Map。
@@ -337,6 +328,7 @@ public class GitService implements AutoCloseable, IGitService {
      * @throws IOException               IO 失败
      * @throws IllegalArgumentException  ref 无法解析，或 fromRef 不是 toRef 的祖先
      */
+    @Override
     public int countCommitsBetween(String fromRef, String toRef) throws IOException {
         ObjectId fromId = repository.resolve(fromRef);
         ObjectId toId = repository.resolve(toRef);
@@ -380,6 +372,7 @@ public class GitService implements AutoCloseable, IGitService {
      * @throws IOException               IO 失败
      * @throws IllegalArgumentException  ref 无法解析，或 fromRef 不是 toRef 的祖先
      */
+    @Override
     public void forEachCommitBetween(String fromRef, String toRef,
                                      Consumer<GitCommitInfo> consumer) throws IOException {
         ObjectId fromId = repository.resolve(fromRef);
