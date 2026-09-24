@@ -20,11 +20,15 @@ import org.jspecify.annotations.NonNull;
 
 import java.io.File;
 import java.util.*;
+import java.util.Collections;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.eclipse.jgit.lib.Constants;
 
@@ -88,91 +92,96 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
             Map<String, CommitMeta> commitMetaMap = commits.stream()
                     .collect(Collectors.toMap(CommitMeta::getHash, c -> c));
 
-            List<GitCommitInfo> commitInfos;
-            if (firstHash.equals(lastHash)) {
-                GitCommitInfo info = gitService.getCommitInfo(firstHash);
-                commitInfos = Collections.singletonList(info);
-            } else {
-                commitInfos = gitService.getCommitsBetween(firstHash, lastHash);
-            }
-
             ChangeLogDao changeLogDao = new ChangeLogDaoImpl(dbManager);
 
-            for (int i = 0; i < commitInfos.size(); i++) {
-                GitCommitInfo info = commitInfos.get(i);
+            if (firstHash.equals(lastHash)) {
+                GitCommitInfo info = gitService.getCommitInfo(firstHash);
                 CommitMeta commitMeta = commitMetaMap.get(info.getCommitHash());
-                if (commitMeta == null) {
-                    log.warn("Commit {} not found in commit meta map",
-                            info.getCommitHash().substring(0, Math.min(7, info.getCommitHash().length())));
-                    continue;
+                if (commitMeta != null) {
+                    List<ChangeLog> changeLogs = analyzeDiff(info.getDiffEntries(), commitMeta);
+                    changeLogDao.saveAll(changeLogs);
+                    log.info("Analyzed commit 1/1: {} changes", changeLogs.size());
                 }
-
-                List<ChangeLog> changeLogs = analyzeDiff(info.getDiffEntries(), commitMeta);
-                changeLogDao.saveAll(changeLogs);
-
                 if (onProgress != null) {
-                    float progress = (float) (i + 1) / commitInfos.size();
-                    onProgress.accept(progress);
+                    onProgress.accept(1.0f);
                 }
+            } else {
+                int totalCommits = gitService.countCommitsBetween(firstHash, lastHash);
+                AtomicInteger processed = new AtomicInteger(0);
 
-                log.info("Analyzed commit {}/{}: {} changes", i + 1, commitInfos.size(), changeLogs.size());
+                gitService.forEachCommitBetween(firstHash, lastHash, info -> {
+                    CommitMeta commitMeta = commitMetaMap.get(info.getCommitHash());
+                    if (commitMeta == null) {
+                        log.warn("Commit {} not found in commit meta map",
+                                info.getCommitHash().substring(0, Math.min(7, info.getCommitHash().length())));
+                        return;
+                    }
+
+                    List<ChangeLog> changeLogs = analyzeDiff(info.getDiffEntries(), commitMeta);
+                    changeLogDao.saveAll(changeLogs);
+
+                    int cur = processed.incrementAndGet();
+                    if (onProgress != null) {
+                        onProgress.accept((float) cur / totalCommits);
+                    }
+                    log.info("Analyzed commit {}/{}: {} changes", cur, totalCommits, changeLogs.size());
+                });
             }
         }
     }
 
     private @NonNull List<ChangeLog> analyzeDiff(@NonNull List<GitDiffEntry> diffs, CommitMeta commit) {
-        List<ChangeLog> changeLogs = new ArrayList<>();
+        List<ChangeLog> changeLogs = diffs.parallelStream()
+                .flatMap(diff -> {
+                    String filePath = diff.getNewPath() != null ? diff.getNewPath() : diff.getOldPath();
+                    EntityLanguage language = ParserRegistry.detectLanguage(filePath);
 
-        for (GitDiffEntry diff : diffs) {
-            String filePath = diff.getNewPath() != null ? diff.getNewPath() : diff.getOldPath();
-            EntityLanguage language = ParserRegistry.detectLanguage(filePath);
-
-            if (language == null || !ParserRegistry.hasParser(language)) {
-                continue;
-            }
-
-            SourceCode beforeCode = buildSourceCode(filePath, diff.getOldContent(), language);
-            SourceCode afterCode = buildSourceCode(filePath, diff.getNewContent(), language);
-
-            LanguageParser parser = ParserRegistry.getParserInstance(language);
-            List<EntityChange> entityChanges = parser.parseChangeNatureFlags(beforeCode, afterCode);
-
-            for (EntityChange ec : entityChanges) {
-                Entity entity;
-                ChangeOperation operation;
-                Entity parentEntity = null;
-
-                if (ec.getBefore() == null) {
-                    entity = ec.getAfter();
-                    operation = ChangeOperation.ADD;
-                } else if (ec.getAfter() == null) {
-                    entity = ec.getBefore();
-                    operation = ChangeOperation.REMOVE;
-                } else {
-                    entity = ec.getAfter();
-                    operation = ChangeOperation.MODIFY;
-                    if (!ec.getBefore().getName().equals(ec.getAfter().getName())) {
-                        parentEntity = ec.getBefore();
+                    if (language == null || !ParserRegistry.hasParser(language)) {
+                        return Stream.empty();
                     }
-                }
 
-                entity.setLanguage(language);
+                    SourceCode beforeCode = buildSourceCode(filePath, diff.getOldContent(), language);
+                    SourceCode afterCode = buildSourceCode(filePath, diff.getNewContent(), language);
 
-                changeLogs.add(ChangeLog.builder()
-                        .commit(commit)
-                        .entity(entity)
-                        .filePath(filePath)
-                        .operation(operation)
-                        .natureFlagCode(ec.getFlags())
-                        .parentEntity(parentEntity)
-                        .dataQuality(DataQuality.AST)
-                        .analysisType(AnalysisType.INCREMENTAL)
-                        .build());
-            }
-        }
+                    LanguageParser parser = ParserRegistry.getParserInstance(language);
+                    List<EntityChange> entityChanges = parser.parseChangeNatureFlags(beforeCode, afterCode);
 
-        changeLogs = matchCrossFileRefactors(changeLogs);
-        return changeLogs;
+                    return entityChanges.stream().map(ec -> {
+                        Entity entity;
+                        ChangeOperation operation;
+                        Entity parentEntity = null;
+
+                        if (ec.getBefore() == null) {
+                            entity = ec.getAfter();
+                            operation = ChangeOperation.ADD;
+                        } else if (ec.getAfter() == null) {
+                            entity = ec.getBefore();
+                            operation = ChangeOperation.REMOVE;
+                        } else {
+                            entity = ec.getAfter();
+                            operation = ChangeOperation.MODIFY;
+                            if (!ec.getBefore().getName().equals(ec.getAfter().getName())) {
+                                parentEntity = ec.getBefore();
+                            }
+                        }
+
+                        entity.setLanguage(language);
+
+                        return ChangeLog.builder()
+                                .commit(commit)
+                                .entity(entity)
+                                .filePath(filePath)
+                                .operation(operation)
+                                .natureFlagCode(ec.getFlags())
+                                .parentEntity(parentEntity)
+                                .dataQuality(DataQuality.AST)
+                                .analysisType(AnalysisType.INCREMENTAL)
+                                .build();
+                    });
+                })
+                .collect(Collectors.toList());
+
+        return matchCrossFileRefactors(changeLogs);
     }
 
     private static final double SIGNATURE_MATCH_THRESHOLD = 0.7;
@@ -183,13 +192,12 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
         List<ChangeLog> additions = changeLogs.stream()
                 .filter(c -> c.getOperation() == ChangeOperation.ADD).toList();
 
-        Set<ChangeLog> matched = new HashSet<>();
-        List<ChangeLog> result = new ArrayList<>();
+        Set<ChangeLog> matched = ConcurrentHashMap.newKeySet();
+        List<ChangeLog> result = Collections.synchronizedList(new ArrayList<>());
 
-        for (ChangeLog removed : removals) {
+        removals.parallelStream().forEach(removed -> {
             Entity removedEntity = removed.getEntity();
             for (ChangeLog added : additions) {
-                if (matched.contains(added)) continue;
                 if (removed.getFilePath().equals(added.getFilePath())) continue;
 
                 Entity addedEntity = added.getEntity();
@@ -198,8 +206,10 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
                 double similarity = computeStructuralSimilarity(removedEntity, addedEntity);
                 if (similarity < SIGNATURE_MATCH_THRESHOLD) continue;
 
+                if (!matched.add(added)) {
+                    continue;
+                }
                 matched.add(removed);
-                matched.add(added);
                 result.add(ChangeLog.builder()
                         .commit(added.getCommit())
                         .entity(addedEntity)
@@ -210,15 +220,14 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
                         .dataQuality(added.getDataQuality())
                         .analysisType(added.getAnalysisType())
                         .build());
-                break;
+                return;
             }
-        }
+        });
 
-        for (ChangeLog c : changeLogs) {
-            if (!matched.contains(c)) {
-                result.add(c);
-            }
-        }
+        changeLogs.stream()
+                .filter(c -> !matched.contains(c))
+                .forEach(result::add);
+
         return result;
     }
 
@@ -323,7 +332,8 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
 
 
     @Override
-    public CompletableFuture<Void> incrementalAnalysisAsync(String repoPath, File databaseFile, Consumer<Float> onProgress, Function<Throwable, Void> onError) {
+    public CompletableFuture<Void> incrementalAnalysisAsync(String repoPath, File databaseFile,
+            Consumer<Float> onProgress, Function<Throwable, Void> onError) {
         int hash = Objects.hash(repoPath, databaseFile);
         if (incrementalAnalysisFutures.containsKey(hash)) {
             if (incrementalAnalysisFutures.get(hash).isDone()) {
@@ -332,8 +342,114 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
                 return incrementalAnalysisFutures.get(hash);
             }
         }
-        // TODO 实现
-        return null;
+
+        CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
+            try {
+                runIncrementalAnalysis(repoPath, databaseFile, onProgress);
+            } catch (Exception e) {
+                throw new CompletionException(e);
+            }
+        }).exceptionally(e -> {
+            log.error("Incremental analysis failed", e);
+            if (onError != null) {
+                onError.apply(e);
+            }
+            return null;
+        }).whenComplete((_, _) -> incrementalAnalysisFutures.remove(hash));
+
+        incrementalAnalysisFutures.put(hash, future);
+        return future;
+    }
+
+    private void runIncrementalAnalysis(String repoPath, File databaseFile,
+            Consumer<Float> onProgress) throws Exception {
+        if (!databaseFile.exists()) {
+            throw new IllegalStateException(
+                    "Database file does not exist: " + databaseFile.getAbsolutePath()
+                            + ". Please run full analysis first.");
+        }
+
+        try (GitService gitService = new GitService(repoPath);
+             DatabaseManager dbManager = new DatabaseManager(databaseFile, false)) {
+
+            CommitMetaDao commitMetaDao = new CommitMetaDaoImpl(dbManager);
+            ChangeLogDao changeLogDao = new ChangeLogDaoImpl(dbManager);
+
+            CommitMeta latestInDb = commitMetaDao.findLatest();
+            if (latestInDb == null) {
+                throw new IllegalStateException(
+                        "Database is empty. Please run full analysis first.");
+            }
+
+            String latestHash = latestInDb.getHash();
+            String headHash = gitService.getHeadCommit();
+            if (headHash == null) {
+                log.info("HEAD is null, nothing to analyze");
+                if (onProgress != null) {
+                    onProgress.accept(1.0f);
+                }
+                return;
+            }
+
+            if (latestHash.equals(headHash)) {
+                log.info("Already up to date, no new commits");
+                if (onProgress != null) {
+                    onProgress.accept(1.0f);
+                }
+                return;
+            }
+
+            Set<String> existingHashes = commitMetaDao.findAll().stream()
+                    .map(CommitMeta::getHash)
+                    .collect(Collectors.toSet());
+
+            int totalCommits = gitService.countCommitsBetween(latestHash, headHash);
+            AtomicInteger processed = new AtomicInteger(0);
+
+            try {
+                gitService.forEachCommitBetween(latestHash, headHash, info -> {
+                    if (existingHashes.contains(info.getCommitHash())) {
+                        return;
+                    }
+
+                    CommitMeta meta = CommitMeta.builder()
+                            .hash(info.getCommitHash())
+                            .author(Author.builder()
+                                    .name(info.getAuthorName())
+                                    .email(info.getAuthorEmail())
+                                    .build())
+                            .timestamp((int) info.getTimestamp())
+                            .message(info.getFullMessage())
+                            .build();
+                    commitMetaDao.save(meta);
+
+                    List<ChangeLog> changeLogs = analyzeDiff(info.getDiffEntries(), meta);
+                    changeLogDao.saveAll(changeLogs);
+
+                    int cur = processed.incrementAndGet();
+                    if (onProgress != null) {
+                        onProgress.accept((float) cur / totalCommits);
+                    }
+                    log.info("Analyzed commit {}/{}: {} changes",
+                            cur, totalCommits, changeLogs.size());
+                });
+            } catch (IllegalArgumentException e) {
+                throw new IllegalStateException(
+                        "Database commit " + latestHash.substring(0, 7)
+                                + " is not an ancestor of HEAD. A full re-analysis may be required.",
+                        e);
+            }
+
+            if (processed.get() == 0) {
+                log.info("No new commits to analyze");
+                if (onProgress != null) {
+                    onProgress.accept(1.0f);
+                }
+                return;
+            }
+
+            saveRefs(gitService, dbManager, commitMetaDao);
+        }
     }
 
     @Override

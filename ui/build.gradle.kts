@@ -1,8 +1,8 @@
 plugins {
-    kotlin("jvm")
-    id("org.jetbrains.compose")
-    id("org.jetbrains.kotlin.plugin.compose")
-    id("org.openjfx.javafxplugin") version "0.1.0"
+    alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.compose)
+    alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.javafxplugin)
 }
 
 kotlin {
@@ -37,7 +37,7 @@ dependencies {
     implementation(compose.material3)
     implementation(compose.materialIconsExtended)
     implementation(project(":core"))
-    implementation("cafe.adriel.lyricist:lyricist:1.8.0")
+    implementation(libs.lyricist)
 }
 
 tasks.register<JavaExec>("runEChartsDemo") {

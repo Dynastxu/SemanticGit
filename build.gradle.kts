@@ -1,14 +1,16 @@
 plugins {
     `java-library`
-    id("io.freefair.lombok") version "9.5.0" apply false
-    kotlin("jvm") version "2.3.20" apply false
-    id("org.jetbrains.compose") version "1.9.3" apply false
-    id("org.jetbrains.kotlin.plugin.compose") version "2.3.20" apply false
+    alias(libs.plugins.lombok) apply false
+    alias(libs.plugins.kotlin.jvm) apply false
+    alias(libs.plugins.compose) apply false
+    alias(libs.plugins.kotlin.compose) apply false
 }
+
+val versionCatalogLibs = libs
 
 allprojects {
     group = "com.github.semanticgit"
-    version = property("vision") as String
+    version = property("version") as String
 
     repositories {
         mavenCentral()
@@ -29,12 +31,12 @@ subprojects {
     }
 
     dependencies {
-        implementation("org.slf4j:slf4j-simple:${property("slf4jVersion")}")
-        implementation("org.jspecify:jspecify:${property("jspecifyVersion")}")
-        compileOnly("org.jetbrains:annotations:${property("jetbrainsAnnotationsVersion")}")
+        implementation(versionCatalogLibs.slf4j.simple)
+        implementation(versionCatalogLibs.jspecify)
+        compileOnly(versionCatalogLibs.jetbrains.annotations)
 
-        testImplementation("org.junit.jupiter:junit-jupiter:${property("junitVersion")}")
-        testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+        testImplementation(versionCatalogLibs.junit.jupiter)
+        testRuntimeOnly(versionCatalogLibs.junit.platform.launcher)
     }
 
     tasks.withType<JavaCompile> {

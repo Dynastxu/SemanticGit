@@ -48,8 +48,11 @@ public class ParserRegistry {
         parserExample.registerConfigs(configMap);
     }
 
+    private static final ThreadLocal<Map<EntityLanguage, LanguageParser>> parserCache =
+            ThreadLocal.withInitial(() -> new EnumMap<>(EntityLanguage.class));
+
     public static LanguageParser getParserInstance(EntityLanguage language) {
-        return parserMap.get(language).apply(configMap);
+        return parserCache.get().computeIfAbsent(language, lang -> parserMap.get(lang).apply(configMap));
     }
 
     public static LanguageParser getParserInstance(EntityLanguage language, Map<String, ConfigItem<?>> configMap) {
