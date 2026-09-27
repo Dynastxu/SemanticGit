@@ -10,6 +10,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -495,6 +496,175 @@ class GitServiceTest {
             GitDiffEntry e = byNewPath(service().getDiffBetweenCommits(c1, c2)).get("big.txt");
             assertNotNull(e);
             assertNull(e.getNewContent());
+        }
+    }
+    @Nested
+    @DisplayName("countCommitsBetween / forEachCommitBetween")
+    class CountAndForEach {
+
+        @Test
+        @DisplayName("count 应返回正确数量")
+        void count() throws Exception {
+            String c1 = repo.commitFile("a.txt", "A", "first");
+            repo.commitFile("b.txt", "B", "second");
+            repo.commitFile("c.txt", "C", "third");
+            String c4 = repo.commitFile("d.txt", "D", "fourth");
+
+            assertEquals(3, service().countCommitsBetween(c1, c4));
+        }
+
+        @Test
+        @DisplayName("from == to 时 count 为 0")
+        void countSameHash() throws Exception {
+            String h = repo.commitFile("test.txt", "test", "init");
+            assertEquals(0, service().countCommitsBetween(h, h));
+        }
+
+        @Test
+        @DisplayName("count 与 getCommitsBetween().size() 一致")
+        void countMatchesList() throws Exception {
+            String c1 = repo.commitFile("a.txt", "A", "first");
+            repo.commitFile("b.txt", "B", "second");
+            String c3 = repo.commitFile("c.txt", "C", "third");
+
+            GitService s = service();
+            assertEquals(s.getCommitsBetween(c1, c3).size(),
+                    s.countCommitsBetween(c1, c3));
+        }
+
+        @Test
+        @DisplayName("forEach 应按时间倒序逐个回调")
+        void forEachOrder() throws Exception {
+            String c1 = repo.commitFile("a.txt", "A", "first");
+            String c2 = repo.commitFile("b.txt", "B", "second");
+            String c3 = repo.commitFile("c.txt", "C", "third");
+
+            List<String> hashes = new ArrayList<>();
+            service().forEachCommitBetween(c1, c3, info -> hashes.add(info.getCommitHash()));
+
+            assertEquals(List.of(c3, c2), hashes);
+        }
+
+        @Test
+        @DisplayName("forEach 与 getCommitsBetween 结果一致")
+        void forEachMatchesList() throws Exception {
+            String c1 = repo.commitFile("a.txt", "A", "first");
+            repo.commitFile("b.txt", "B", "second");
+            String c3 = repo.commitFile("c.txt", "C", "third");
+
+            GitService s = service();
+            List<String> fromList = s.getCommitsBetween(c1, c3).stream()
+                    .map(GitCommitInfo::getCommitHash)
+                    .toList();
+
+            List<String> fromForEach = new ArrayList<>();
+            s.forEachCommitBetween(c1, c3, info -> fromForEach.add(info.getCommitHash()));
+
+            assertEquals(fromList, fromForEach);
+        }
+
+        @Test
+        @DisplayName("非祖先关系应抛异常")
+        void notAncestor() throws Exception {
+            repo.commitFile("a.txt", "A", "first");
+            repo.raw().checkout().setCreateBranch(true).setName("feature").call();
+            String featureTip = repo.commitFile("b.txt", "B", "feature");
+            repo.raw().checkout().setName(service().getDefaultBranch()).call();
+            String mainTip = repo.commitFile("c.txt", "C", "main");
+
+            assertAll(
+                    () -> assertThrows(IllegalArgumentException.class,
+                            () -> service().countCommitsBetween(mainTip, featureTip)),
+                    () -> assertThrows(IllegalArgumentException.class,
+                            () -> service().forEachCommitBetween(mainTip, featureTip, info -> {}))
+            );
+        }
+
+        @Test
+        @DisplayName("无效 ref 应抛异常")
+        void invalidRef() throws Exception {
+            String h = repo.commitFile("test.txt", "test", "init");
+            assertAll(
+                    () -> assertThrows(IllegalArgumentException.class,
+                            () -> service().countCommitsBetween(h, "deadbeef")),
+                    () -> assertThrows(IllegalArgumentException.class,
+                            () -> service().forEachCommitBetween("deadbeef", h, info -> {}))
+            );
+        }
+    }
+    @Nested
+    @DisplayName("First-Parent 遍历")
+    class FirstParent {
+
+        /**
+         * 构造分叉 + merge：
+         *   main:    A ── C ── M
+         *                        /
+         *   feature:            B
+         */
+        private String[] buildMergeScenario() throws Exception {
+            repo.commitFile("a.txt", "A", "commit A");
+            String hashA = repo.head();
+
+            String defaultBranch = service().getDefaultBranch();
+
+            repo.raw().checkout().setCreateBranch(true).setName("feature").call();
+            repo.commitFile("b.txt", "B", "commit B");
+            String hashB = repo.head();
+
+            repo.raw().checkout().setName(defaultBranch).call();
+            repo.commitFile("c.txt", "C", "commit C");
+            String hashC = repo.head();
+
+            repo.raw().merge()
+                    .include(repo.raw().getRepository().resolve("feature"))
+                    .setCommit(true)
+                    .setMessage("merge feature")
+                    .call();
+            String hashM = repo.head();
+
+            return new String[]{hashA, hashB, hashC, hashM};
+        }
+
+        @Test
+        @DisplayName("getAllCommits 应排除 feature 分支的提交")
+        void allCommitsExcludesFeature() throws Exception {
+            String[] h = buildMergeScenario();
+            List<String> actual = service().getAllCommits().stream()
+                    .map(CommitMeta::getHash).toList();
+
+            assertEquals(List.of(h[3], h[2], h[0]), actual);
+            assertFalse(actual.contains(h[1]), "feature 分支的 B 不应出现");
+        }
+
+        @Test
+        @DisplayName("getCommitsBetween 应排除 feature 分支的提交")
+        void commitsBetweenExcludesFeature() throws Exception {
+            String[] h = buildMergeScenario();
+            List<String> actual = service().getCommitsBetween(h[0], h[3]).stream()
+                    .map(GitCommitInfo::getCommitHash).toList();
+
+            assertEquals(List.of(h[3], h[2]), actual);
+            assertFalse(actual.contains(h[1]));
+        }
+
+        @Test
+        @DisplayName("countCommitsBetween 应只数 first-parent 链上的提交")
+        void countExcludesFeature() throws Exception {
+            String[] h = buildMergeScenario();
+            assertEquals(2, service().countCommitsBetween(h[0], h[3]));
+        }
+
+        @Test
+        @DisplayName("forEachCommitBetween 应只遍历 first-parent 链")
+        void forEachExcludesFeature() throws Exception {
+            String[] h = buildMergeScenario();
+            List<String> collected = new ArrayList<>();
+            service().forEachCommitBetween(h[0], h[3],
+                    info -> collected.add(info.getCommitHash()));
+
+            assertEquals(List.of(h[3], h[2]), collected);
+            assertFalse(collected.contains(h[1]));
         }
     }
 }
