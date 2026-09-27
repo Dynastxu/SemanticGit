@@ -5,6 +5,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 data class Strings(
     val appTitle: String,
     val navRepository: String,
+    val navEntity: String,
     val navCommit: String,
     val navHistory: String,
     val navTools: String,
@@ -17,17 +18,33 @@ data class Strings(
     val repoSelectPlaceholder: String,
     val repoSelectFolder: String,
     val repoNoRepoSelected: String,
+    val currentRepository: String,
+    val noRepositorySelected: String,
     val repoAnalyzing: String,
     val repoAnalysisFailed: String,
     val repoOperationDistribution: String,
     val repoNatureDistribution: String,
     val repoTotalCommits: String,
-    val repoAnalysisStatus: String
+    val repoAnalysisStatus: String,
+    // Entity Analysis
+    val entityAnalysis: String,
+    val searchEntity: String,
+    val selectBranch: String,
+    val startQuery: String,
+    val querying: String,
+    val reset: String,
+    val pleaseInputEntityName: String,
+    val pleaseSelectBranch: String,
+    val entityChangeHistory: String,
+    val totalChanges: String,
+    val noEntityHistoryFound: String,
+    val noMatchingEntities: String
 )
 
 val ZhStrings = Strings(
     appTitle = "SemanticGit",
     navRepository = "仓库",
+    navEntity = "实体",
     navCommit = "提交",
     navHistory = "历史",
     navTools = "工具",
@@ -40,17 +57,33 @@ val ZhStrings = Strings(
     repoSelectPlaceholder = "选择仓库文件夹...",
     repoSelectFolder = "选择文件夹",
     repoNoRepoSelected = "请选择一个仓库文件夹",
+    currentRepository = "当前仓库",
+    noRepositorySelected = "未选择仓库",
     repoAnalyzing = "正在分析仓库...",
     repoAnalysisFailed = "分析失败",
     repoOperationDistribution = "操作类型分布",
     repoNatureDistribution = "变更性质分布",
     repoTotalCommits = "总提交数",
-    repoAnalysisStatus = "分析状态"
+    repoAnalysisStatus = "分析状态",
+    // Entity Analysis
+    entityAnalysis = "实体变更分析",
+    searchEntity = "搜索实体（全限定名）",
+    selectBranch = "选择分支/Ref",
+    startQuery = "开始查询",
+    querying = "查询中...",
+    reset = "重置",
+    pleaseInputEntityName = "请输入实体名称",
+    pleaseSelectBranch = "请选择分支",
+    entityChangeHistory = "实体变更历史",
+    totalChanges = "总变更数",
+    noEntityHistoryFound = "未找到该实体的变更历史",
+    noMatchingEntities = "无匹配的实体"
 )
 
 val EnStrings = Strings(
     appTitle = "SemanticGit",
     navRepository = "Repository",
+    navEntity = "Entity",
     navCommit = "Commit",
     navHistory = "History",
     navTools = "Tools",
@@ -63,12 +96,27 @@ val EnStrings = Strings(
     repoSelectPlaceholder = "Select repository folder...",
     repoSelectFolder = "Select Folder",
     repoNoRepoSelected = "Please select a repository folder",
+    currentRepository = "Current Repository",
+    noRepositorySelected = "No Repository Selected",
     repoAnalyzing = "Analyzing repository...",
     repoAnalysisFailed = "Analysis failed",
     repoOperationDistribution = "Operation Distribution",
     repoNatureDistribution = "Change Nature Distribution",
     repoTotalCommits = "Total Commits",
-    repoAnalysisStatus = "Analysis Status"
+    repoAnalysisStatus = "Analysis Status",
+    // Entity Analysis
+    entityAnalysis = "Entity Tracking Analysis",
+    searchEntity = "Search Entity (FQN)",
+    selectBranch = "Select Branch/Ref",
+    startQuery = "Start Query",
+    querying = "Querying...",
+    reset = "Reset",
+    pleaseInputEntityName = "Please enter entity name",
+    pleaseSelectBranch = "Please select a branch",
+    entityChangeHistory = "Entity Change History",
+    totalChanges = "Total Changes",
+    noEntityHistoryFound = "No change history found for this entity",
+    noMatchingEntities = "No matching entities"
 )
 
 val LocalStrings = staticCompositionLocalOf { ZhStrings }
