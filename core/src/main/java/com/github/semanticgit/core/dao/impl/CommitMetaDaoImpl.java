@@ -27,7 +27,9 @@ public class CommitMetaDaoImpl implements CommitMetaDao {
         try {
             dbManager.getJdbi().useTransaction(handle -> {
                 Long authorId = upsertAuthor(handle, commit.getAuthor());
-                upsertCommit(handle, commit, authorId, null);
+                CommitMeta parent = commit.getParentCommitMeta();
+                Long parentCommitId = resolveParentCommitId(handle, new HashMap<>(), parent);
+                upsertCommit(handle, commit, authorId, parentCommitId);
             });
         } catch (Exception e) {
             log.error("Failed to save commit: {}", commit.getHash(), e);
@@ -280,11 +282,35 @@ public class CommitMetaDaoImpl implements CommitMetaDao {
 
     private @NonNull Long upsertCommit(Handle handle, @NonNull CommitMeta commit,
                                         Long authorId, Long parentCommitId) {
+        byte[] hashBytes = HexFormat.of().parseHex(commit.getHash());
+
+        Long existingId = handle.createQuery("SELECT id FROM commit_meta WHERE hash = :hash")
+                .bind("hash", hashBytes)
+                .mapTo(Long.class)
+                .findOne()
+                .orElse(null);
+
+        if (existingId != null) {
+            handle.createUpdate("""
+                        UPDATE commit_meta
+                        SET author_id = :author_id, timestamp = :timestamp,
+                            message = :message, parent_commit_id = :parent_commit_id
+                        WHERE id = :id
+                    """)
+                    .bind("author_id", authorId)
+                    .bind("timestamp", commit.getTimestamp())
+                    .bind("message", commit.getMessage())
+                    .bind("parent_commit_id", parentCommitId)
+                    .bind("id", existingId)
+                    .execute();
+            return existingId;
+        }
+
         handle.createUpdate("""
-                    INSERT OR IGNORE INTO commit_meta (hash, author_id, timestamp, message, parent_commit_id)
+                    INSERT INTO commit_meta (hash, author_id, timestamp, message, parent_commit_id)
                     VALUES (:hash, :author_id, :timestamp, :message, :parent_commit_id)
                 """)
-                .bind("hash", HexFormat.of().parseHex(commit.getHash()))
+                .bind("hash", hashBytes)
                 .bind("author_id", authorId)
                 .bind("timestamp", commit.getTimestamp())
                 .bind("message", commit.getMessage())
@@ -292,7 +318,7 @@ public class CommitMetaDaoImpl implements CommitMetaDao {
                 .execute();
 
         return handle.createQuery("SELECT id FROM commit_meta WHERE hash = :hash")
-                .bind("hash", HexFormat.of().parseHex(commit.getHash()))
+                .bind("hash", hashBytes)
                 .mapTo(Long.class)
                 .one();
     }
