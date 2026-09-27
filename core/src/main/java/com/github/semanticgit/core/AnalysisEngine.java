@@ -24,6 +24,10 @@ import java.util.Collections;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -34,6 +38,9 @@ import org.eclipse.jgit.lib.Constants;
 
 @Slf4j
 public class AnalysisEngine extends AbstractAnalysisEngine {
+    // TODO 改为配置项
+    private static final int MAX_QUEUE_SIZE = 64;
+    private static final double SIGNATURE_MATCH_THRESHOLD = 0.7;
 
     @Override
     public CompletableFuture<Void> fullAnalysisAsync(String repoPath, String databaseDir, String databaseName, Consumer<Float> onProgress, Function<Throwable, Void> onError) {
@@ -103,24 +110,48 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
             } else {
                 int totalCommits = gitService.countCommitsBetween(firstHash, lastHash);
                 AtomicInteger processed = new AtomicInteger(0);
+                AtomicInteger inProgress = new AtomicInteger(0);
 
-                gitService.forEachCommitBetween(firstHash, lastHash, info -> {
-                    CommitMeta commitMeta = commitMetaMap.get(info.getCommitHash());
-                    if (commitMeta == null) {
-                        log.warn("Commit {} not found in commit meta map",
-                                info.getCommitHash().substring(0, Math.min(7, info.getCommitHash().length())));
-                        return;
-                    }
+                int parallelism = Math.clamp(totalCommits, 1, Runtime.getRuntime().availableProcessors());
+                List<CompletableFuture<Void>> futures = new ArrayList<>();
+                try (ExecutorService executor = new ThreadPoolExecutor(
+                        parallelism, parallelism,
+                        0L, TimeUnit.MILLISECONDS,
+                        new LinkedBlockingQueue<>(MAX_QUEUE_SIZE),
+                        new ThreadPoolExecutor.CallerRunsPolicy())) {
 
-                    List<ChangeLog> changeLogs = analyzeDiff(info.getDiffEntries(), commitMeta);
-                    changeLogDao.saveAll(changeLogs);
+                    gitService.forEachCommitBetween(firstHash, lastHash, info -> {
+                        CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
+                            inProgress.incrementAndGet();
+                            log.info("In progress: {}", inProgress.get());
+                            try {
+                                CommitMeta commitMeta = commitMetaMap.get(info.getCommitHash());
+                                if (commitMeta == null) {
+                                    log.warn("Commit {} not found in commit meta map",
+                                            info.getCommitHash().substring(0, Math.min(7, info.getCommitHash().length())));
+                                    return;
+                                }
 
-                    int cur = processed.incrementAndGet();
-                    if (onProgress != null) {
-                        onProgress.accept((float) cur / totalCommits);
-                    }
-                    log.info("Analyzed commit {}/{}: {} changes", cur, totalCommits, changeLogs.size());
-                });
+                                List<ChangeLog> changeLogs = analyzeDiff(info.getDiffEntries(), commitMeta);
+
+                                synchronized (changeLogDao) {
+                                    changeLogDao.saveAll(changeLogs);
+                                }
+
+                                int cur = processed.incrementAndGet();
+                                if (onProgress != null) {
+                                    onProgress.accept((float) cur / totalCommits);
+                                }
+                                log.info("Analyzed commit {}/{}: {} changes", cur, totalCommits, changeLogs.size());
+                            } finally {
+                                inProgress.decrementAndGet();
+                            }
+                        }, executor);
+                        futures.add(future);
+                    });
+
+                    CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+                }
             }
         }
     }
@@ -178,8 +209,6 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
 
         return matchCrossFileRefactors(changeLogs);
     }
-
-    private static final double SIGNATURE_MATCH_THRESHOLD = 0.7; // TODO 改为配置项？
 
     @NonNull List<ChangeLog> matchCrossFileRefactors(@NonNull List<ChangeLog> changeLogs) {
         List<ChangeLog> removals = changeLogs.stream()
@@ -293,7 +322,7 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
     }
 
     private void saveRefs(GitService gitService, DatabaseManager dbManager,
-                           CommitMetaDao commitMetaDao) throws Exception {
+                          CommitMetaDao commitMetaDao) throws Exception {
         RefDao refDao = new RefDaoImpl(dbManager);
         Map<String, String> branchHeads = gitService.getAllBranchHeads();
         List<References> refs = new ArrayList<>();
@@ -326,7 +355,7 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
 
     @Override
     public CompletableFuture<Void> incrementalAnalysisAsync(String repoPath, File databaseFile,
-            Consumer<Float> onProgress, Function<Throwable, Void> onError) {
+                                                            Consumer<Float> onProgress, Function<Throwable, Void> onError) {
         int hash = Objects.hash(repoPath, databaseFile);
         if (incrementalAnalysisFutures.containsKey(hash)) {
             if (incrementalAnalysisFutures.get(hash).isDone()) {
@@ -355,7 +384,7 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
     }
 
     private void runIncrementalAnalysis(String repoPath, File databaseFile,
-            Consumer<Float> onProgress) throws Exception {
+                                        Consumer<Float> onProgress) throws Exception {
         if (!databaseFile.exists()) {
             throw new IllegalStateException(
                     "Database file does not exist: " + databaseFile.getAbsolutePath()
