@@ -469,6 +469,12 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
                                     .build());
                         }
 
+                        if (info.getParentCount() >= 2 && info.getParentHashes().size() >= 2) {
+                            builder.mergeParentMeta(CommitMeta.builder()
+                                    .hash(info.getParentHashes().get(1))
+                                    .build());
+                        }
+
                         return builder.build();
                     })
                     .collect(Collectors.toList());
