@@ -2,6 +2,7 @@ package com.github.semanticgit.core;
 
 import com.github.semanticgit.common.entity.*;
 import com.github.semanticgit.core.dao.ChangeLogDao;
+import com.github.semanticgit.core.dao.ChangeLogDao.TraversalMode;
 import com.github.semanticgit.core.dao.CommitMetaDao;
 import com.github.semanticgit.core.dao.impl.ChangeLogDaoImpl;
 import com.github.semanticgit.core.dao.impl.CommitMetaDaoImpl;
@@ -84,9 +85,9 @@ public class StatisticsProvider implements IStatisticsProvider {
     }
 
     @Override
-    public EntityChangeHistory getEntityChangeHistory(String entityName, String refName) {
+    public EntityChangeHistory getEntityChangeHistory(String entityName, String refName, TraversalMode mode) {
         ChangeLogDao changeLogDao = new ChangeLogDaoImpl(dbManager);
-        return changeLogDao.queryEntityChangeHistory(entityName, refName);
+        return changeLogDao.queryEntityChangeHistory(entityName, refName, mode);
     }
 
     @Override

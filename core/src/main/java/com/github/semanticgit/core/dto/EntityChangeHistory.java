@@ -14,4 +14,8 @@ import java.util.List;
 public class EntityChangeHistory {
     @Builder.Default
     private List<ChangeLog> changes = new ArrayList<>();
+    @Builder.Default
+    private List<HistoryNode> nodes = new ArrayList<>();
+    @Builder.Default
+    private List<HistoryEdge> edges = new ArrayList<>();
 }

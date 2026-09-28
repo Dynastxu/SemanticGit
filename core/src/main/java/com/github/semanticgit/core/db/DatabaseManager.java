@@ -63,10 +63,17 @@ public class DatabaseManager implements AutoCloseable {
                             timestamp INTEGER NOT NULL,
                             message TEXT,
                             parent_commit_id INTEGER,
+                            merge_parent_id INTEGER,
                             FOREIGN KEY (author_id) REFERENCES author(id),
-                            FOREIGN KEY (parent_commit_id) REFERENCES commit_meta(id)
+                            FOREIGN KEY (parent_commit_id) REFERENCES commit_meta(id),
+                            FOREIGN KEY (merge_parent_id) REFERENCES commit_meta(id)
                         )
                     """);
+
+            try {
+                handle.execute("ALTER TABLE commit_meta ADD COLUMN merge_parent_id INTEGER REFERENCES commit_meta(id)");
+            } catch (Exception ignored) {
+            }
 
             handle.execute("""
                         CREATE TABLE IF NOT EXISTS entity (
