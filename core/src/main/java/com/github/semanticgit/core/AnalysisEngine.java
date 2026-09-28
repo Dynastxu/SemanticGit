@@ -1,6 +1,7 @@
 package com.github.semanticgit.core;
 
 import com.github.semanticgit.common.entity.*;
+import com.github.semanticgit.core.config.EngineConfigs;
 import com.github.semanticgit.core.dao.ChangeLogDao;
 import com.github.semanticgit.core.dao.CommitMetaDao;
 import com.github.semanticgit.core.dao.RefDao;
@@ -38,10 +39,6 @@ import org.eclipse.jgit.lib.Constants;
 
 @Slf4j
 public class AnalysisEngine extends AbstractAnalysisEngine {
-    // TODO 改为配置项
-    private static final int MAX_QUEUE_SIZE = 64;
-    private static final double SIGNATURE_MATCH_THRESHOLD = 0.7;
-
     @Override
     public CompletableFuture<Void> fullAnalysisAsync(String repoPath, String databaseDir, String databaseName, Consumer<Float> onProgress, Function<Throwable, Void> onError) {
         int hash = Objects.hash(repoPath, databaseDir, databaseName);
@@ -88,6 +85,14 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
             List<CommitMeta> chronological = new ArrayList<>(commits);
             Collections.reverse(chronological);
 
+            int maxDepth = EngineConfigs.getMaxDepth();
+            if (chronological.size() > maxDepth) {
+                chronological = new ArrayList<>(
+                        chronological.subList(chronological.size() - maxDepth, chronological.size()));
+                log.info("Limiting analysis to {} most recent commits (max_depth={})",
+                        chronological.size(), maxDepth);
+            }
+
             String firstHash = chronological.getFirst().getHash();
             String lastHash = chronological.getLast().getHash();
 
@@ -117,7 +122,7 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
                 try (ExecutorService executor = new ThreadPoolExecutor(
                         parallelism, parallelism,
                         0L, TimeUnit.MILLISECONDS,
-                        new LinkedBlockingQueue<>(MAX_QUEUE_SIZE),
+                        new LinkedBlockingQueue<>(EngineConfigs.getMaxQueue()),
                         new ThreadPoolExecutor.CallerRunsPolicy())) {
 
                     gitService.forEachCommitBetween(firstHash, lastHash, info -> {
@@ -226,7 +231,7 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
                 if (removedEntity.getKind() != addedEntity.getKind()) continue;
 
                 double similarity = computeStructuralSimilarity(removedEntity, addedEntity);
-                if (similarity < SIGNATURE_MATCH_THRESHOLD) continue;
+                if (similarity < EngineConfigs.getSignatureMatchThreshold()) continue;
 
                 if (!matched.add(added)) {
                     continue;
