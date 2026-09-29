@@ -1,6 +1,9 @@
 package com.github.semanticgit.core;
 
 import com.github.semanticgit.common.entity.*;
+import com.github.semanticgit.common.exception.AnalysisException;
+import com.github.semanticgit.common.exception.GitOperationException;
+import com.github.semanticgit.common.exception.ParsingException;
 import com.github.semanticgit.core.config.EngineConfigs;
 import com.github.semanticgit.core.dao.ChangeLogDao;
 import com.github.semanticgit.core.dao.CommitMetaDao;
@@ -50,7 +53,7 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
             return CompletableFuture.runAsync(() -> {
                 try {
                     runFullAnalysis(repoPath, databaseDir, databaseName, onProgress);
-                } catch (Exception e) {
+                } catch (AnalysisException e) {
                     throw new CompletionException(e);
                 }
             }).exceptionally(e -> {
@@ -64,7 +67,7 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
     }
 
     private void runFullAnalysis(String repoPath, String databaseDir, String databaseName,
-                                 Consumer<Float> onProgress) throws Exception {
+                                 Consumer<Float> onProgress) throws AnalysisException {
         try (GitService gitService = new GitService(repoPath);
              DatabaseManager dbManager = new DatabaseManager(databaseDir, databaseName, true)) {
 
@@ -158,6 +161,8 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
                     CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
                 }
             }
+        } catch (java.io.IOException e) {
+            throw new GitOperationException("Git operation failed during full analysis", e);
         }
     }
 
@@ -327,9 +332,14 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
     }
 
     private void saveRefs(GitService gitService, DatabaseManager dbManager,
-                          CommitMetaDao commitMetaDao) throws Exception {
+                          CommitMetaDao commitMetaDao) throws AnalysisException {
         RefDao refDao = new RefDaoImpl(dbManager);
-        Map<String, String> branchHeads = gitService.getAllBranchHeads();
+        Map<String, String> branchHeads;
+        try {
+            branchHeads = gitService.getAllBranchHeads();
+        } catch (java.io.IOException e) {
+            throw new GitOperationException("Failed to get branch heads for saving refs", e);
+        }
         List<References> refs = new ArrayList<>();
         for (Map.Entry<String, String> entry : branchHeads.entrySet()) {
             CommitMeta headMeta = commitMetaDao.findByHash(entry.getValue());
@@ -373,7 +383,7 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
         CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
             try {
                 runIncrementalAnalysis(repoPath, databaseFile, onProgress);
-            } catch (Exception e) {
+            } catch (AnalysisException e) {
                 throw new CompletionException(e);
             }
         }).exceptionally(e -> {
@@ -389,7 +399,7 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
     }
 
     private void runIncrementalAnalysis(String repoPath, File databaseFile,
-                                        Consumer<Float> onProgress) throws Exception {
+                                        Consumer<Float> onProgress) throws AnalysisException {
         if (!databaseFile.exists()) {
             throw new IllegalStateException(
                     "Database file does not exist: " + databaseFile.getAbsolutePath()
@@ -501,6 +511,8 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
             }
 
             saveRefs(gitService, dbManager, commitMetaDao);
+        } catch (java.io.IOException e) {
+            throw new GitOperationException("Git operation failed during incremental analysis", e);
         }
     }
 
