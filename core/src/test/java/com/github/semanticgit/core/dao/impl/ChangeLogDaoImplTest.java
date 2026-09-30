@@ -10,6 +10,7 @@ import com.github.semanticgit.common.entity.DataQuality;
 import com.github.semanticgit.common.entity.Entity;
 import com.github.semanticgit.common.entity.EntityKind;
 import com.github.semanticgit.common.entity.EntityLanguage;
+import com.github.semanticgit.common.exception.DatabaseOperationException;
 import com.github.semanticgit.core.dao.ChangeLogDao;
 import com.github.semanticgit.core.dao.CommitMetaDao;
 import com.github.semanticgit.core.db.DatabaseManager;
@@ -256,7 +257,7 @@ class ChangeLogDaoImplTest {
     }
 
     @Test
-    @DisplayName("save: 不存在的提交 hash 应被吞掉异常（log error）")
+    @DisplayName("save: 不存在的提交 hash 应抛出 DatabaseOperationException")
     void save_NonExistentCommitHash_NoException() {
         CommitMeta unknownCommit = CommitMeta.builder()
                 .hash("nonexistent")
@@ -279,8 +280,8 @@ class ChangeLogDaoImplTest {
                 .analysisType(AnalysisType.INCREMENTAL)
                 .build();
 
-        assertDoesNotThrow(() -> changeLogDao.save(changeLog),
-                "不存在的提交不应抛出未捕获异常");
+        assertThrows(DatabaseOperationException.class, () -> changeLogDao.save(changeLog),
+                "不存在的提交应抛出 DatabaseOperationException");
     }
 
     @Test

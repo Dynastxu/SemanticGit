@@ -2,6 +2,7 @@ package com.github.semanticgit.core.dao.impl;
 
 import com.github.semanticgit.common.entity.ReferenceType;
 import com.github.semanticgit.common.entity.References;
+import com.github.semanticgit.common.exception.DatabaseOperationException;
 import com.github.semanticgit.core.dao.RefDao;
 import com.github.semanticgit.core.db.DatabaseManager;
 import lombok.extern.slf4j.Slf4j;
@@ -33,6 +34,7 @@ public class RefDaoImpl implements RefDao {
             );
         } catch (Exception e) {
             log.error("Failed to save ref: {}", ref.getName(), e);
+            throw new DatabaseOperationException("Failed to save ref: " + ref.getName(), e);
         }
     }
 
@@ -57,6 +59,7 @@ public class RefDaoImpl implements RefDao {
             log.info("Saved {} refs to database", refs.size());
         } catch (Exception e) {
             log.error("Failed to save refs batch", e);
+            throw new DatabaseOperationException("Failed to save refs batch", e);
         }
     }
 

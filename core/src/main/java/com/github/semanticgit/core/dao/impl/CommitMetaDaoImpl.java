@@ -2,6 +2,7 @@ package com.github.semanticgit.core.dao.impl;
 
 import com.github.semanticgit.common.entity.Author;
 import com.github.semanticgit.common.entity.CommitMeta;
+import com.github.semanticgit.common.exception.DatabaseOperationException;
 import com.github.semanticgit.core.dao.CommitMetaDao;
 import com.github.semanticgit.core.db.DatabaseManager;
 import lombok.extern.slf4j.Slf4j;
@@ -33,6 +34,7 @@ public class CommitMetaDaoImpl implements CommitMetaDao {
             });
         } catch (Exception e) {
             log.error("Failed to save commit: {}", commit.getHash(), e);
+            throw new DatabaseOperationException("Failed to save commit: " + commit.getHash(), e);
         }
     }
 
@@ -52,6 +54,7 @@ public class CommitMetaDaoImpl implements CommitMetaDao {
             log.info("Saved {} commits to database", commits.size());
         } catch (Exception e) {
             log.error("Failed to save commits batch", e);
+            throw new DatabaseOperationException("Failed to save commits batch", e);
         }
     }
 
