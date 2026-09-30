@@ -231,8 +231,14 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
 
         removals.parallelStream().forEach(removed -> {
             Entity removedEntity = removed.getEntity();
+            if (removedEntity == null || removedEntity.getKind() == null) {
+                return;
+            }
             for (ChangeLog added : additions) {
                 Entity addedEntity = added.getEntity();
+                if (addedEntity == null || addedEntity.getKind() == null) {
+                    continue;
+                }
                 if (removedEntity.getKind() != addedEntity.getKind()) continue;
 
                 double similarity = computeStructuralSimilarity(removedEntity, addedEntity);
