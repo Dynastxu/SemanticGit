@@ -63,7 +63,7 @@ public class JavaParser extends AbstractParser {
     private static final Pattern FIX_BOUNDS_CHECK = Pattern.compile(
             "if\\s*\\(.*(?:index|i|j|idx|pos|offset|size|len|length).*(?:<\\s*0|>=\\s*\\w+\\.size\\s*\\(|>=\\s*\\w+\\.length|>=\\s*\\w+\\.length\\s*\\()",
             Pattern.MULTILINE);
-    private static final Pattern FIX_TRY_CATCH = Pattern.compile("\\btry\\s*(?:\\(|\\{)");
+    private static final Pattern FIX_TRY_CATCH = Pattern.compile("\\btry\\s*[({]");
     private static final Pattern FIX_THROW = Pattern.compile("\\bthrow\\s+(?:new\\s+)?(?:RuntimeException|IllegalArgumentException|IllegalStateException|NullPointerException|IndexOutOfBoundsException|Exception|Error)");
     private static final Pattern FIX_EARLY_RETURN = Pattern.compile("if\\s*\\(.*\\)\\s*\\{?\\s*return\\b", Pattern.MULTILINE);
 
