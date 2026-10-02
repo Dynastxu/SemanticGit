@@ -212,12 +212,15 @@ public class JavaParser extends AbstractParser {
         return matcher.find() ? matcher.group(1) : "";
     }
 
-    private String findParentClass(@NonNull String content, int methodPos) {
+    private @NonNull String findParentClass(@NonNull String content, int methodPos) {
         String before = content.substring(0, methodPos);
         java.util.regex.Matcher matcher = PARENT_CLASS_PATTERN.matcher(before);
         String lastClass = "Unknown";
         while (matcher.find()) {
             lastClass = matcher.group(1);
+        }
+        if (lastClass.equals("Unknown")) {
+            log.warn("No parent class found for method at position {}", methodPos);
         }
         return lastClass;
     }
