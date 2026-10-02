@@ -202,6 +202,9 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
                         }
 
                         entity.setLanguage(language);
+                        if (parentEntity != null) {
+                            parentEntity.setLanguage(language);
+                        }
 
                         return ChangeLog.builder()
                                 .commit(commit)
