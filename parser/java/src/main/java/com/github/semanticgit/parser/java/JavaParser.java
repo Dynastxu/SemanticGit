@@ -19,11 +19,32 @@ import org.jspecify.annotations.NonNull;
 
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Slf4j
 @NoArgsConstructor
 public class JavaParser extends AbstractParser {
+
+    // ============ 变更 1 + 3: 预编译字段（AST 解析器 + Regex Pattern） ============
+    private static final com.github.javaparser.JavaParser AST_PARSER = createAstParser();
+
+    private static final Pattern CLASS_DECL_PATTERN = Pattern.compile(
+            "(?:public\\s+|private\\s+|protected\\s+)?(?:abstract\\s+|final\\s+)?class\\s+(\\w+)",
+            Pattern.MULTILINE);
+
+    private static final Pattern METHOD_DECL_PATTERN = Pattern.compile(
+            "(?:public\\s+|private\\s+|protected\\s+)?(?:static\\s+)?(?:\\w+\\s+)+(\\w+)\\s*\\(([^)]*)\\)\\s*(?:throws\\s+\\w+)?\\s*\\{",
+            Pattern.MULTILINE);
+
+    private static final Pattern PKG_PATTERN = Pattern.compile(
+            "^\\s*package\\s+([\\w.]+)\\s*;",
+            Pattern.MULTILINE);
+
+    private static final Pattern PARENT_CLASS_PATTERN = Pattern.compile(
+            "class\\s+(\\w+)\\s*\\{?\\s*$",
+            Pattern.MULTILINE);
+
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
     public JavaParser(Map<String, ConfigItem<?>> configMap) {
@@ -121,23 +142,21 @@ public class JavaParser extends AbstractParser {
         return buildFallbackResult(DataQuality.FILE, remark);
     }
 
-    protected ParseResult<CompilationUnit> parseWithAST(String content) {
-        ParserConfiguration parserConfig = new ParserConfiguration();
-        parserConfig.setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17);
-        parserConfig.setStoreTokens(true);
+    private static com.github.javaparser.JavaParser createAstParser() {
+        ParserConfiguration config = new ParserConfiguration();
+        config.setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17);
+        config.setStoreTokens(true);
+        return new com.github.javaparser.JavaParser(config);
+    }
 
-        com.github.javaparser.JavaParser parser = new com.github.javaparser.JavaParser(parserConfig);
-        return parser.parse(ParseStart.COMPILATION_UNIT, new StringProvider(content));
+    protected ParseResult<CompilationUnit> parseWithAST(String content) {
+        return AST_PARSER.parse(ParseStart.COMPILATION_UNIT, new StringProvider(content));
     }
 
     private @NonNull List<Entity> extractWithRegex(String content) {
         List<Entity> entities = new ArrayList<>();
 
-        java.util.regex.Pattern classPattern = java.util.regex.Pattern.compile(
-                "(?:public\\s+|private\\s+|protected\\s+)?(?:abstract\\s+|final\\s+)?class\\s+(\\w+)",
-                java.util.regex.Pattern.MULTILINE
-        );
-        java.util.regex.Matcher classMatcher = classPattern.matcher(content);
+        java.util.regex.Matcher classMatcher = CLASS_DECL_PATTERN.matcher(content);
         while (classMatcher.find()) {
             String className = classMatcher.group(1);
             String packageName = extractPackageName(content);
@@ -148,11 +167,7 @@ public class JavaParser extends AbstractParser {
                     .build());
         }
 
-        java.util.regex.Pattern methodPattern = java.util.regex.Pattern.compile(
-                "(?:public\\s+|private\\s+|protected\\s+)?(?:static\\s+)?(?:\\w+\\s+)+(\\w+)\\s*\\(([^)]*)\\)\\s*(?:throws\\s+\\w+)?\\s*\\{",
-                java.util.regex.Pattern.MULTILINE
-        );
-        java.util.regex.Matcher methodMatcher = methodPattern.matcher(content);
+        java.util.regex.Matcher methodMatcher = METHOD_DECL_PATTERN.matcher(content);
         String packageName = extractPackageName(content);
         while (methodMatcher.find()) {
             String methodName = methodMatcher.group(1);
@@ -171,21 +186,13 @@ public class JavaParser extends AbstractParser {
     }
 
     private String extractPackageName(String content) {
-        java.util.regex.Pattern pkgPattern = java.util.regex.Pattern.compile(
-                "^\\s*package\\s+([\\w.]+)\\s*;",
-                java.util.regex.Pattern.MULTILINE
-        );
-        java.util.regex.Matcher matcher = pkgPattern.matcher(content);
+        java.util.regex.Matcher matcher = PKG_PATTERN.matcher(content);
         return matcher.find() ? matcher.group(1) : "";
     }
 
     private String findParentClass(@NonNull String content, int methodPos) {
         String before = content.substring(0, methodPos);
-        java.util.regex.Pattern classPattern = java.util.regex.Pattern.compile(
-                "class\\s+(\\w+)\\s*\\{?\\s*$",
-                java.util.regex.Pattern.MULTILINE
-        );
-        java.util.regex.Matcher matcher = classPattern.matcher(before);
+        java.util.regex.Matcher matcher = PARENT_CLASS_PATTERN.matcher(before);
         String lastClass = "Unknown";
         while (matcher.find()) {
             lastClass = matcher.group(1);
@@ -292,14 +299,50 @@ public class JavaParser extends AbstractParser {
                 .build();
     }
 
+    /**
+     * 直接解析 sourceCode 为 entity map，绕过 executor（用于 parseChangeNatureFlags 内部并行，
+     * 避免与外层 executor.submit 形成嵌套提交链导致死锁）。
+     */
+    private Map<String, Entity> parseEntityMapDirect(SourceCode sourceCode) {
+        if (sourceCode == null || sourceCode.getContent() == null) {
+            return Collections.emptyMap();
+        }
+        try {
+            ParsingResult result = doParse(sourceCode);
+            return result.getEntities().stream()
+                    .collect(Collectors.toMap(Entity::getName, e -> e, (a, _) -> a));
+        } catch (Exception e) {
+            log.error("Direct parse error for {}", sourceCode.getFilePath(), e);
+            return Collections.emptyMap();
+        }
+    }
+
     @Override
     public List<EntityChange> parseChangeNatureFlags(SourceCode sourceCodeBefore, SourceCode sourceCodeAfter) {
         List<EntityChange> changes = new ArrayList<>();
 
-        Map<String, Entity> beforeEntities = sourceCodeBefore != null
-                ? parseEntityMap(sourceCodeBefore) : Collections.emptyMap();
-        Map<String, Entity> afterEntities = sourceCodeAfter != null
-                ? parseEntityMap(sourceCodeAfter) : Collections.emptyMap();
+        // ============ 变更 2: before / after 并行解析 ============
+        CompletableFuture<Map<String, Entity>> beforeFuture = CompletableFuture.supplyAsync(() ->
+                sourceCodeBefore != null ? parseEntityMapDirect(sourceCodeBefore) : Collections.emptyMap());
+        CompletableFuture<Map<String, Entity>> afterFuture = CompletableFuture.supplyAsync(() ->
+                sourceCodeAfter != null ? parseEntityMapDirect(sourceCodeAfter) : Collections.emptyMap());
+
+        Map<String, Entity> beforeEntities;
+        Map<String, Entity> afterEntities;
+        try {
+            beforeEntities = beforeFuture.get(getTimeoutMs(), TimeUnit.MILLISECONDS);
+            afterEntities = afterFuture.get(getTimeoutMs(), TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            beforeFuture.cancel(true);
+            afterFuture.cancel(true);
+            log.warn("Parallel parse timeout for change nature flags: {}ms", getTimeoutMs());
+            beforeEntities = Collections.emptyMap();
+            afterEntities = Collections.emptyMap();
+        } catch (Exception e) {
+            log.error("Parallel parse error for change nature flags: {}", e.getMessage());
+            beforeEntities = Collections.emptyMap();
+            afterEntities = Collections.emptyMap();
+        }
 
         SourceCode fileHint = sourceCodeAfter != null ? sourceCodeAfter : sourceCodeBefore;
         int testFlag = isTestFile(fileHint) ? ChangeNatureFlag.TEST.code : 0;
