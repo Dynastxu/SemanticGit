@@ -2,9 +2,12 @@
 
 package com.github.semanticgit.ui.chart
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.awt.SwingPanel
+import androidx.compose.ui.draw.alpha
 import javafx.application.Platform
 import javafx.concurrent.Worker
 import javafx.embed.swing.JFXPanel
@@ -41,9 +44,9 @@ private object JavaFXBootstrap {
 fun EChartsView(
     modifier: Modifier = Modifier,
     optionJson: String? = null,
+    darkMode: Boolean = false,
     onChartClick: ((series: String, name: String, value: String) -> Unit)? = null
 ) {
-    // ★ 创建 JFXPanel 后立即设置 setImplicitExit(false)
     val jfxPanel = remember {
         JFXPanel().also {
             JavaFXBootstrap.ensure()
@@ -52,6 +55,12 @@ fun EChartsView(
     val webViewRef = remember { mutableStateOf<WebView?>(null) }
     val pageReady = remember { mutableStateOf(false) }
     val callbackState = rememberUpdatedState(onChartClick)
+
+    val targetAlpha = if (pageReady.value) 1f else 0f
+    val animatedAlpha by animateFloatAsState(
+        targetValue = targetAlpha,
+        animationSpec = tween(durationMillis = 500)
+    )
 
     LaunchedEffect(Unit) {
         JavaFXBootstrap.ensure()   // 双保险
@@ -121,6 +130,21 @@ fun EChartsView(
         }
     }
 
+    LaunchedEffect(darkMode, pageReady.value) {
+        if (pageReady.value) {
+            webViewRef.value?.let { webView ->
+                Platform.runLater {
+                    try {
+                        val dark = if (darkMode) "true" else "false"
+                        webView.engine.executeScript("setDarkMode($dark)")
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+            }
+        }
+    }
+
     DisposableEffect(Unit) {
         onDispose {
             println("🧹 EChartsView 开始清理")
@@ -151,7 +175,10 @@ fun EChartsView(
         }
     }
 
-    SwingPanel(factory = { jfxPanel }, modifier = modifier)
+    SwingPanel(
+        factory = { jfxPanel },
+        modifier = modifier.alpha(animatedAlpha)
+    )
 }
 
 private fun applyOption(webView: WebView, json: String) {

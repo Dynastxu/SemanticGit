@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons.Outlined as OutlinedIcons
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -41,6 +42,7 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.github.semanticgit.ui.page.RepoPage
 import com.github.semanticgit.ui.page.EntityAnalysis
+import java.io.File
 
 fun main() = application {
     val windowState = rememberWindowState(width = 1200.dp, height = 800.dp)
@@ -84,8 +86,22 @@ private fun WindowScope.SemanticGitApp(
     var selectedIndex by remember { mutableStateOf(0) }
     val strings = LocalStrings.current
 
-    val repoPaths = remember { mutableStateListOf<String>() }
-    var selectedRepoIndex by remember { mutableStateOf(-1) }
+    val repoHistoryFile = remember { File(System.getProperty("user.home"), ".semanticgit/repos.txt") }
+
+    val repoPaths = remember {
+        mutableStateListOf<String>().also { list ->
+            loadRepoPaths(repoHistoryFile).forEach { path ->
+                list.add(path)
+            }
+        }
+    }
+    var selectedRepoIndex by remember {
+        mutableStateOf(if (repoPaths.isNotEmpty()) 0 else -1)
+    }
+
+    LaunchedEffect(repoPaths.toList()) {
+        saveRepoPaths(repoHistoryFile, repoPaths.toList())
+    }
 
     val navItems = listOf(
         NavItem(
@@ -177,5 +193,26 @@ private fun WindowScope.SemanticGitApp(
                 }
             }
         }
+    }
+}
+
+private fun loadRepoPaths(file: File): List<String> {
+    if (!file.exists()) return emptyList()
+    return try {
+        file.readLines()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && File(it).exists() && File(it).isDirectory }
+    } catch (e: Exception) {
+        e.printStackTrace()
+        emptyList()
+    }
+}
+
+private fun saveRepoPaths(file: File, paths: List<String>) {
+    try {
+        file.parentFile?.mkdirs()
+        file.writeText(paths.joinToString("\n"))
+    } catch (e: Exception) {
+        e.printStackTrace()
     }
 }
