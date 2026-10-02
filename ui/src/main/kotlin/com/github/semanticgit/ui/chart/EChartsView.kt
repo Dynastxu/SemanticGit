@@ -12,6 +12,7 @@ import javafx.application.Platform
 import javafx.concurrent.Worker
 import javafx.embed.swing.JFXPanel
 import javafx.scene.Scene
+import javafx.scene.paint.Color
 import javafx.scene.web.WebView
 import netscape.javascript.JSObject
 import javax.swing.SwingUtilities
@@ -49,6 +50,7 @@ fun EChartsView(
 ) {
     val jfxPanel = remember {
         JFXPanel().also {
+            it.isOpaque = false
             JavaFXBootstrap.ensure()
         }
     }
@@ -108,7 +110,9 @@ fun EChartsView(
 
                 webView.engine.loadContent(html)
                 webViewRef.value = webView
-                jfxPanel.scene = Scene(webView)
+                val scene = Scene(webView)
+                scene.fill = Color.TRANSPARENT
+                jfxPanel.scene = scene
             } catch (e: Exception) {
                 e.printStackTrace()
                 pageReady.value = false

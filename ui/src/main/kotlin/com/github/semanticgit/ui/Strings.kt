@@ -38,7 +38,16 @@ data class Strings(
     val entityChangeHistory: String,
     val totalChanges: String,
     val noEntityHistoryFound: String,
-    val noMatchingEntities: String
+    val noMatchingEntities: String,
+    val entityOperationDistribution: String,
+    val entityNatureDistribution: String,
+    val elapsedTime: String,
+    val estimatedRemaining: String,
+    val loadDbFile: String,
+    val selectDbFile: String,
+    val loadFromDb: String,
+    val dbFileLoaded: String,
+    val failedToLoadDb: String
 )
 
 val ZhStrings = Strings(
@@ -77,7 +86,16 @@ val ZhStrings = Strings(
     entityChangeHistory = "实体变更历史",
     totalChanges = "总变更数",
     noEntityHistoryFound = "未找到该实体的变更历史",
-    noMatchingEntities = "无匹配的实体"
+    noMatchingEntities = "无匹配的实体",
+    entityOperationDistribution = "实体变更操作分布",
+    entityNatureDistribution = "实体变更性质分布",
+    elapsedTime = "已用时",
+    estimatedRemaining = "预计剩余",
+    loadDbFile = "加载数据库文件",
+    selectDbFile = "选择数据库文件",
+    loadFromDb = "从数据库加载",
+    dbFileLoaded = "数据库文件已加载",
+    failedToLoadDb = "加载数据库文件失败"
 )
 
 val EnStrings = Strings(
@@ -116,7 +134,16 @@ val EnStrings = Strings(
     entityChangeHistory = "Entity Change History",
     totalChanges = "Total Changes",
     noEntityHistoryFound = "No change history found for this entity",
-    noMatchingEntities = "No matching entities"
+    noMatchingEntities = "No matching entities",
+    entityOperationDistribution = "Entity Operation Distribution",
+    entityNatureDistribution = "Entity Change Nature Distribution",
+    elapsedTime = "Elapsed",
+    estimatedRemaining = "ETA",
+    loadDbFile = "Load Database File",
+    selectDbFile = "Select Database File",
+    loadFromDb = "Load from DB",
+    dbFileLoaded = "Database file loaded",
+    failedToLoadDb = "Failed to load database file"
 )
 
 val LocalStrings = staticCompositionLocalOf { ZhStrings }

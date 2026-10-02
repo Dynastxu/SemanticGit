@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Search
@@ -37,7 +39,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -47,11 +48,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.github.semanticgit.common.entity.ChangeLog
+import com.github.semanticgit.common.entity.ChangeNatureFlag
 import com.github.semanticgit.common.entity.ChangeOperation
 import com.github.semanticgit.core.StatisticsProvider
 import com.github.semanticgit.core.db.DatabaseManager
 import com.github.semanticgit.core.dto.EntityChangeHistory
 import com.github.semanticgit.ui.LocalStrings
+import com.github.semanticgit.ui.LocalThemeMode
+import com.github.semanticgit.ui.ThemeMode
+import com.github.semanticgit.ui.chart.EChartsView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -87,8 +92,16 @@ fun EntityAnalysis(
     var entityHistory by remember { mutableStateOf<EntityChangeHistory?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
+    var customDbFile by remember { mutableStateOf<File?>(null) }
+
     // 分支列表（从 Git 仓库动态获取）
     var branches by remember { mutableStateOf<List<String>>(emptyList()) }
+
+    LaunchedEffect(customDbFile) {
+        if (customDbFile != null && branches.isEmpty()) {
+            selectedBranch = "refs/heads/main"
+        }
+    }
 
     // 实体搜索自动补全
     var allEntities by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -103,7 +116,16 @@ fun EntityAnalysis(
             } catch (e: Exception) {
                 listOf("refs/heads/main")
             }
-            selectedBranch = branches.firstOrNull() ?: ""
+            val currentBranch = try {
+                gitService.getCurrentBranch()
+            } catch (e: Exception) {
+                null
+            }
+            val currentBranchRef = if (currentBranch != null) "refs/heads/$currentBranch" else null
+            selectedBranch = if (currentBranchRef != null && currentBranchRef in branches)
+                currentBranchRef
+            else
+                branches.firstOrNull() ?: ""
             allEntities = searchAllEntities(selectedPath)
         } else {
             branches = emptyList()
@@ -125,7 +147,7 @@ fun EntityAnalysis(
 
         HorizontalDivider()
 
-        // ============ 当前仓库信息 ============
+        // ============ 当前仓库/数据库信息 ============
         if (selectedPath != null) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -145,8 +167,79 @@ fun EntityAnalysis(
                     )
                     Text(
                         text = "${strings.currentRepository}: ${File(selectedPath).name}",
-                        style = MaterialTheme.typography.bodyLarge
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.weight(1f)
                     )
+                    OutlinedButton(
+                        onClick = {
+                            val chooser = javax.swing.JFileChooser()
+                            chooser.fileSelectionMode = javax.swing.JFileChooser.FILES_ONLY
+                            chooser.dialogTitle = strings.selectDbFile
+                            chooser.fileFilter = javax.swing.filechooser.FileNameExtensionFilter("Database files (*.db)", "db")
+                            val result = chooser.showOpenDialog(null)
+                            if (result == javax.swing.JFileChooser.APPROVE_OPTION) {
+                                val file = chooser.selectedFile
+                                customDbFile = file
+                                entityHistory = null
+                                errorMessage = null
+                                scope.launch {
+                                    allEntities = searchAllEntitiesFromDb(file)
+                                }
+                            }
+                        }
+                    ) {
+                        Text(strings.loadDbFile)
+                    }
+                }
+            }
+        } else if (customDbFile != null) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer
+                )
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Folder,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.secondary
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "${strings.loadFromDb}: ${customDbFile!!.name}",
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        Text(
+                            text = customDbFile!!.absolutePath,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            val chooser = javax.swing.JFileChooser()
+                            chooser.fileSelectionMode = javax.swing.JFileChooser.FILES_ONLY
+                            chooser.dialogTitle = strings.selectDbFile
+                            chooser.fileFilter = javax.swing.filechooser.FileNameExtensionFilter("Database files (*.db)", "db")
+                            val result = chooser.showOpenDialog(null)
+                            if (result == javax.swing.JFileChooser.APPROVE_OPTION) {
+                                val file = chooser.selectedFile
+                                customDbFile = file
+                                entityHistory = null
+                                errorMessage = null
+                                scope.launch {
+                                    allEntities = searchAllEntitiesFromDb(file)
+                                }
+                            }
+                        }
+                    ) {
+                        Text(strings.loadDbFile)
+                    }
                 }
             }
         } else {
@@ -156,13 +249,39 @@ fun EntityAnalysis(
                     containerColor = MaterialTheme.colorScheme.errorContainer
                 )
             ) {
-                Text(
-                    text = strings.noRepositorySelected,
+                Row(
                     modifier = Modifier.padding(12.dp),
-                    color = MaterialTheme.colorScheme.onErrorContainer
-                )
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = strings.noRepositorySelected,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            val chooser = javax.swing.JFileChooser()
+                            chooser.fileSelectionMode = javax.swing.JFileChooser.FILES_ONLY
+                            chooser.dialogTitle = strings.selectDbFile
+                            chooser.fileFilter = javax.swing.filechooser.FileNameExtensionFilter("Database files (*.db)", "db")
+                            val result = chooser.showOpenDialog(null)
+                            if (result == javax.swing.JFileChooser.APPROVE_OPTION) {
+                                val file = chooser.selectedFile
+                                customDbFile = file
+                                entityHistory = null
+                                errorMessage = null
+                                scope.launch {
+                                    allEntities = searchAllEntitiesFromDb(file)
+                                }
+                            }
+                        }
+                    ) {
+                        Text(strings.loadDbFile)
+                    }
+                }
             }
-            return@Column
+            // 允许仅加载 DB 文件，不强制要求仓库
         }
 
         // ============ 搜索框（带自动补全） ============
@@ -273,7 +392,7 @@ fun EntityAnalysis(
         // ============ 操作按钮行 ============
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.End
         ) {
             Button(
                 onClick = {
@@ -285,10 +404,12 @@ fun EntityAnalysis(
                         errorMessage = strings.pleaseSelectBranch
                         return@Button
                     }
-                    
+
+                    val dbFileToUse = customDbFile
                     scope.launch {
                         queryEntityChangeHistory(
-                            repoPath = selectedPath!!,
+                            repoPath = selectedPath,
+                            dbFile = dbFileToUse,
                             entityName = searchQuery,
                             refName = selectedBranch,
                             onLoading = { isLoading = it },
@@ -361,11 +482,26 @@ fun EntityAnalysis(
 
         // ============ 结果展示区域 ============
         if (entityHistory != null && !entityHistory!!.changes.isEmpty()) {
-            EntityChangeHistoryCard(
-                entityName = searchQuery,
-                refName = selectedBranch,
-                changes = entityHistory!!.changes
-            )
+            val changes = entityHistory!!.changes
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                EntityChangeStatisticsCharts(
+                    entityName = searchQuery,
+                    changes = changes
+                )
+
+                HorizontalDivider()
+
+                EntityChangeHistoryCard(
+                    entityName = searchQuery,
+                    refName = selectedBranch,
+                    changes = changes
+                )
+            }
         } else if (entityHistory != null && entityHistory!!.changes.isEmpty() && !isLoading) {
             Card(
                 modifier = Modifier.fillMaxSize(),
@@ -398,6 +534,157 @@ fun EntityAnalysis(
 }
 
 /**
+ * 实体变更统计图表
+ *
+ * 显示该实体的变更操作分布和变更性质分布图表
+ */
+@Composable
+private fun EntityChangeStatisticsCharts(
+    entityName: String,
+    changes: List<ChangeLog>
+) {
+    val strings = LocalStrings.current
+    val themeMode = LocalThemeMode.current
+    val isDark = themeMode == ThemeMode.Dark
+
+    val operationMap = remember(changes) {
+        val map = mutableMapOf<ChangeOperation, Float>()
+        val total = changes.size.toFloat()
+        if (total > 0) {
+            changes.groupingBy { it.operation }.eachCount().forEach { (op, count) ->
+                map[op] = count / total
+            }
+        }
+        map
+    }
+
+    val natureMap = remember(changes) {
+        val map = mutableMapOf<ChangeNatureFlag, Float>()
+        val total = changes.size.toFloat()
+        if (total > 0) {
+            for (change in changes) {
+                val flags = ChangeNatureFlag.fromCode(change.natureFlagCode)
+                for (flag in flags) {
+                    map[flag] = (map[flag] ?: 0f) + (1f / total)
+                }
+            }
+        }
+        map
+    }
+
+    val operationOptionJson = remember(operationMap, strings, isDark) {
+        buildRoseChartOption(
+            title = strings.entityOperationDistribution,
+            dataMap = operationMap,
+            entries = ChangeOperation.entries.toList(),
+            nameExtractor = { it.desc },
+            darkMode = isDark
+        )
+    }
+
+    val natureOptionJson = remember(natureMap, strings, isDark) {
+        buildRoseChartOption(
+            title = strings.entityNatureDistribution,
+            dataMap = natureMap,
+            entries = ChangeNatureFlag.entries.toList(),
+            nameExtractor = { it.name.lowercase() },
+            darkMode = isDark
+        )
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp)
+        ) {
+            Text(
+                text = "${strings.entityAnalysis}: $entityName",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                text = "${strings.totalChanges}: ${changes.size}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.secondary
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth().height(320.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                EChartsView(
+                    optionJson = operationOptionJson,
+                    darkMode = isDark,
+                    modifier = Modifier.weight(1f).fillMaxSize()
+                )
+                EChartsView(
+                    optionJson = natureOptionJson,
+                    darkMode = isDark,
+                    modifier = Modifier.weight(1f).fillMaxSize()
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 构建玫瑰图 Option JSON（与 RepoPage 共用逻辑）
+ */
+private fun <T> buildRoseChartOption(
+    title: String,
+    dataMap: Map<T, Float>,
+    entries: List<T>,
+    nameExtractor: (T) -> String,
+    darkMode: Boolean = false
+): String {
+    val dataItems = entries.joinToString(",") { entry ->
+        val value = ((dataMap[entry] ?: 0f) * 100).toInt()
+        """{"value":$value,"name":"${nameExtractor(entry)}"}"""
+    }
+    val legendItems = entries.joinToString(",") { """"${nameExtractor(it)}"""" }
+
+    val titleColor = if (darkMode) "#E2E2E6" else "#1A1C1E"
+    val legendColor = if (darkMode) "#C3C7CF" else "#43474E"
+
+    return """
+        {
+            "backgroundColor": "transparent",
+            "title": {
+                "text": "$title",
+                "left": "center",
+                "textStyle": { "color": "$titleColor" }
+            },
+            "tooltip": { "trigger": "item", "formatter": "{b} : {d}%" },
+            "legend": {
+                "left": "center",
+                "top": "bottom",
+                "textStyle": { "color": "$legendColor" },
+                "data": [$legendItems]
+            },
+            "animationDuration": 800,
+            "animationEasing": "cubicOut",
+            "series": [{
+                "type": "pie",
+                "radius": [20, 140],
+                "roseType": "radius",
+                "itemStyle": { "borderRadius": 5 },
+                "label": { "show": false },
+                "emphasis": { "label": { "show": true } },
+                "animationType": "scale",
+                "animationEasing": "elasticOut",
+                "animationDelay": "function (idx) { return idx * 100; }",
+                "data": [$dataItems]
+            }]
+        }
+    """.trimIndent()
+}
+
+/**
  * 实体变更历史卡片
  */
 @Composable
@@ -409,13 +696,13 @@ private fun EntityChangeHistoryCard(
     val strings = LocalStrings.current
     
     Card(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
         )
     ) {
         Column(
-            modifier = Modifier.fillMaxSize().padding(16.dp)
+            modifier = Modifier.fillMaxWidth().padding(16.dp)
         ) {
             // 标题栏
             Row(
@@ -535,7 +822,8 @@ private fun ChangeLogItem(changeLog: ChangeLog) {
  * 无需反射，类型安全且与 RepoPage 保持一致。
  */
 private suspend fun queryEntityChangeHistory(
-    repoPath: String,
+    repoPath: String?,
+    dbFile: File? = null,
     entityName: String,
     refName: String,
     onLoading: (Boolean) -> Unit,
@@ -545,10 +833,16 @@ private suspend fun queryEntityChangeHistory(
     try {
         onLoading(true)
 
-        val dbDir = "${System.getProperty("user.home")}/.semanticgit/db"
-        val dbName = Integer.toHexString(File(repoPath).absolutePath.hashCode())
+        val dbManager: DatabaseManager = if (dbFile != null && dbFile.exists()) {
+            DatabaseManager(dbFile.parentFile?.absolutePath ?: ".", dbFile.nameWithoutExtension, false)
+        } else {
+            val repo = repoPath ?: throw IllegalStateException("No repo path or DB file provided")
+            val dbDir = "${System.getProperty("user.home")}/.semanticgit/db"
+            val dbName = Integer.toHexString(File(repo).absolutePath.hashCode())
+            DatabaseManager(dbDir, dbName, false)
+        }
 
-        DatabaseManager(dbDir, dbName, false).use { dbManager ->
+        dbManager.use { dbManager ->
             val provider = StatisticsProvider(dbManager)
             val result = provider.getEntityChangeHistory(entityName, refName)
             onSuccess(result)
@@ -582,33 +876,19 @@ private suspend fun searchAllEntities(repoPath: String): List<String> = withCont
 }
 
 /**
- * TODO: 待实现的接口 - 分支/Ref 列表服务
- * 
- * 功能：获取 Git 仓库的所有分支和 Ref
- * 用途：填充分支选择下拉列表
- * 
- * 示例实现位置：git 模块 或 core 模块
- * 
- * interface RefListService {
- *     /**
- *      * 获取所有 Ref 列表
- *      * @param repoPath Git 仓库路径
- *      * @return Ref 名称列表（如 ["refs/heads/main", "refs/heads/develop", "refs/tags/v1.0"]）
- *      */
- *     fun getRefs(repoPath: String): List<String>
- *     
- *     /**
- *      * 获取所有本地分支
- *      * @param repoPath Git 仓库路径
- *      * @return 分支名称列表（如 ["main", "develop", "feature/x"]）
- *      */
- *     fun getLocalBranches(repoPath: String): List<String>
- *     
- *     /**
- *      * 获取所有远程分支
- *      * @param repoPath Git 仓库路径
- *      * @return 远程分支名称列表
- *      */
- *     fun getRemoteBranches(repoPath: String): List<String>
- * }
+ * 从指定的 DB 文件加载全部实体名
  */
+private suspend fun searchAllEntitiesFromDb(dbFile: File): List<String> = withContext(Dispatchers.IO) {
+    try {
+        val parentDir = dbFile.parentFile?.absolutePath ?: "."
+        val dbName = dbFile.nameWithoutExtension
+
+        DatabaseManager(parentDir, dbName, false).use { dbManager ->
+            val provider = StatisticsProvider(dbManager)
+            provider.getEntities().map { it.name }
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+        emptyList()
+    }
+}

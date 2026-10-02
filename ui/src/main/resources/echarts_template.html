@@ -8,7 +8,7 @@
             margin: 0; padding: 0;
             width: 100%; height: 100%;
             overflow: hidden;
-            background: transparent;
+            background: transparent !important;
         }
 
         #chart {
@@ -48,16 +48,11 @@
             currentDarkMode = dark;
             if (myChart) {
                 var colors = getThemeColors();
-                var currentOption = myChart.getOption();
-                if (currentOption && currentOption.title) {
-                    currentOption.title[0].textStyle = currentOption.title[0].textStyle || {};
-                    currentOption.title[0].textStyle.color = colors.textColor;
-                }
-                if (currentOption && currentOption.legend) {
-                    currentOption.legend[0].textStyle = currentOption.legend[0].textStyle || {};
-                    currentOption.legend[0].textStyle.color = colors.textColorSecondary;
-                }
-                myChart.setOption(currentOption);
+                myChart.setOption({
+                    backgroundColor: 'transparent',
+                    title: { textStyle: { color: colors.textColor } },
+                    legend: { textStyle: { color: colors.textColorSecondary } }
+                });
             }
         }
     }

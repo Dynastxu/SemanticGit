@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -108,6 +109,7 @@ fun RepoPage(
 
     // ============ 分析状态 ============
     var isAnalyzing by remember { mutableStateOf(false) }
+    var analysisProgress by remember { mutableStateOf(0f) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var statistics by remember { mutableStateOf<SimpleEntityChangeStatistics?>(null) }
 
@@ -135,11 +137,14 @@ fun RepoPage(
         val path = selectedPath ?: return
         scope.launch {
             isAnalyzing = true
+            analysisProgress = 0f
             errorMessage = null
             statistics = null
             try {
                 val settings = buildSettings()
-                val result = executeCoreAnalysis(path, mode, settings)
+                val result = executeCoreAnalysis(path, mode, settings) { progress ->
+                    analysisProgress = progress
+                }
                 when (result) {
                     is AnalysisResult.Success -> {
                         statistics = result.statistics
@@ -235,7 +240,7 @@ fun RepoPage(
                     }
                 }
                 isAnalyzing -> {
-                    AnalyzingView(strings = strings)
+                    AnalyzingView(strings = strings, progress = analysisProgress)
                 }
                 currentErrorMessage != null -> {
                     Box(
@@ -527,7 +532,10 @@ private fun ConfigContent(
 // ==================== 分析中视图 ====================
 
 @Composable
-private fun AnalyzingView(strings: com.github.semanticgit.ui.Strings) {
+private fun AnalyzingView(
+    strings: com.github.semanticgit.ui.Strings,
+    progress: Float = 0f
+) {
     var elapsedSeconds by remember { mutableStateOf(0) }
 
     LaunchedEffect(Unit) {
@@ -538,11 +546,14 @@ private fun AnalyzingView(strings: com.github.semanticgit.ui.Strings) {
     }
 
     val phase = when {
-        elapsedSeconds < 5 -> "正在读取仓库..."
-        elapsedSeconds < 20 -> "正在解析文件..."
-        elapsedSeconds < 60 -> "正在统计变更..."
+        progress < 0.05f -> "正在读取仓库..."
+        progress < 0.3f -> "正在解析文件..."
+        progress < 0.9f -> "正在统计变更..."
         else -> "正在生成图表..."
     }
+
+    val estimatedTotal = if (progress > 0.01f) (elapsedSeconds / progress).toInt() else 0
+    val estimatedRemaining = if (estimatedTotal > elapsedSeconds) estimatedTotal - elapsedSeconds else 0
 
     Box(
         modifier = Modifier.fillMaxSize(),
@@ -550,7 +561,7 @@ private fun AnalyzingView(strings: com.github.semanticgit.ui.Strings) {
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.width(320.dp)
+            modifier = Modifier.width(360.dp)
         ) {
             CircularProgressIndicator(
                 modifier = Modifier.size(56.dp),
@@ -568,13 +579,41 @@ private fun AnalyzingView(strings: com.github.semanticgit.ui.Strings) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(modifier = Modifier.height(24.dp))
-            Text(
-                text = "已用时：${elapsedSeconds} 秒",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
             Spacer(modifier = Modifier.height(16.dp))
+
+            LinearProgressIndicator(
+                progress = { progress.coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth().height(8.dp),
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "${strings.elapsedTime}：${elapsedSeconds}s",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (progress > 0.01f) {
+                    Text(
+                        text = "${"%.0f".format(progress * 100)}%",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                if (estimatedRemaining > 0) {
+                    Text(
+                        text = "${strings.estimatedRemaining}：~${estimatedRemaining}s",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = "分析时间取决于仓库大小，请耐心等待",
                 style = MaterialTheme.typography.bodySmall,
@@ -705,6 +744,7 @@ private fun <T> buildRoseChartOption(
 
     return """
         {
+            "backgroundColor": "transparent",
             "title": {
                 "text": "$title",
                 "left": "center",
@@ -747,7 +787,8 @@ sealed class AnalysisResult {
 private suspend fun executeCoreAnalysis(
     repoPath: String,
     mode: AnalysisMode = AnalysisMode.FULL,
-    settings: ParserSettings? = null
+    settings: ParserSettings? = null,
+    onProgress: (Float) -> Unit = {}
 ): AnalysisResult {
     return withContext(Dispatchers.IO) {
         try {
@@ -762,19 +803,19 @@ private suspend fun executeCoreAnalysis(
                 AnalysisMode.FULL -> {
                     if (dbFile.exists()) dbFile.delete()
                     val future = engine.fullAnalysisAsync(
-                        repoPath, dbDir, dbName, {}, { e -> e.printStackTrace(); null }
+                        repoPath, dbDir, dbName, onProgress, { e -> e.printStackTrace(); null }
                     )
                     future.join()
                 }
                 AnalysisMode.INCREMENTAL -> {
                     if (dbFile.exists()) {
                         val future = engine.incrementalAnalysisAsync(
-                            repoPath, dbFile, {}, { e -> e.printStackTrace(); null }
+                            repoPath, dbFile, onProgress, { e -> e.printStackTrace(); null }
                         )
                         future.join()
                     } else {
                         val future = engine.fullAnalysisAsync(
-                            repoPath, dbDir, dbName, {}, { e -> e.printStackTrace(); null }
+                            repoPath, dbDir, dbName, onProgress, { e -> e.printStackTrace(); null }
                         )
                         future.join()
                     }
