@@ -19,11 +19,54 @@ import org.jspecify.annotations.NonNull;
 
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Slf4j
 @NoArgsConstructor
 public class JavaParser extends AbstractParser {
+
+    // ============ 变更 1 + 3: 预编译字段（AST 解析器 + Regex Pattern） ============
+    // 注意：javaparser.JavaParser 实例不是线程安全的，多线程共享同一个 parse() 调用会
+    // 导致内部状态错乱（Lexer / TokenStore）→ 解析失败 → fallback 到 regex → entity
+    // key 格式全错。因此用 ThreadLocal 隔离，每个线程独立实例。
+    private static final ThreadLocal<com.github.javaparser.JavaParser> AST_PARSER = ThreadLocal
+            .withInitial(JavaParser::createAstParser);
+
+    private static final Pattern CLASS_DECL_PATTERN = Pattern.compile(
+            "(?:public\\s+|private\\s+|protected\\s+)?(?:abstract\\s+|final\\s+)?class\\s+(\\w+)",
+            Pattern.MULTILINE);
+
+    private static final Pattern METHOD_DECL_PATTERN = Pattern.compile(
+            "(?:public\\s+|private\\s+|protected\\s+)?(?:static\\s+)?(?:\\w+\\s+)+(\\w+)\\s*\\(([^)]*)\\)\\s*(?:throws\\s+\\w+)?\\s*\\{",
+            Pattern.MULTILINE);
+
+    private static final Pattern PKG_PATTERN = Pattern.compile(
+            "^\\s*package\\s+([\\w.]+)\\s*;",
+            Pattern.MULTILINE);
+
+    private static final Pattern PARENT_CLASS_PATTERN = Pattern.compile(
+            "class\\s+(\\w+)\\s*\\{?\\s*$",
+            Pattern.MULTILINE);
+
+    // ============ PERF 信号检测 Pattern ============
+    private static final Pattern PERF_CONCURRENT_HM = Pattern.compile("\\bConcurrentHashMap\\b|\\bConcurrentMap\\b|\\bCopyOnWriteArrayList\\b");
+    private static final Pattern PERF_COMPUTE_IF_ABSENT = Pattern.compile("\\.computeIfAbsent\\s*\\(|\\.putIfAbsent\\s*\\(|\\.computeIfPresent\\s*\\(");
+    private static final Pattern PERF_PARALLEL_STREAM = Pattern.compile("\\.parallelStream\\s*\\(\\)");
+    private static final Pattern PERF_PREALLOCATED_COLL = Pattern.compile("new\\s+(?:HashMap|ArrayList|HashSet|ArrayDeque|LinkedHashMap|TreeMap)\\s*\\(\\s*\\d+\\s*\\)");
+    private static final Pattern PERF_PRIMITIVE = Pattern.compile("\\bInteger\\s+(\\w+);\\s*(?://[^\\n]*\\n)?\\s*(?:\\1\\s*=\\s*)?Integer\\.intValue\\s*\\(\\1\\)|\\bLong\\s+(\\w+);\\s*(?://[^\\n]*\\n)?\\s*(?:\\2\\s*=\\s*)?Long\\.longValue\\s*\\(\\2\\)");
+    private static final Pattern PERF_STRING_BUILDER = Pattern.compile("new\\s+StringBuilder\\s*\\(|\\.append\\s*\\(");
+
+    // ============ FIX 信号检测 Pattern（防御性编程新增） ============
+    private static final Pattern FIX_NULL_CHECK = Pattern.compile("if\\s*\\(.*==\\s*null.*\\)", Pattern.MULTILINE);
+    private static final Pattern FIX_OBJECTS_NON_NULL = Pattern.compile("Objects\\.requireNonNull\\s*\\(|Optional\\.ofNullable\\s*\\(");
+    private static final Pattern FIX_BOUNDS_CHECK = Pattern.compile(
+            "if\\s*\\(.*(?:index|i|j|idx|pos|offset|size|len|length).*(?:<\\s*0|>=\\s*\\w+\\.size\\s*\\(|>=\\s*\\w+\\.length|>=\\s*\\w+\\.length\\s*\\()",
+            Pattern.MULTILINE);
+    private static final Pattern FIX_TRY_CATCH = Pattern.compile("\\btry\\s*(?:\\(|\\{)");
+    private static final Pattern FIX_THROW = Pattern.compile("\\bthrow\\s+(?:new\\s+)?(?:RuntimeException|IllegalArgumentException|IllegalStateException|NullPointerException|IndexOutOfBoundsException|Exception|Error)");
+    private static final Pattern FIX_EARLY_RETURN = Pattern.compile("if\\s*\\(.*\\)\\s*\\{?\\s*return\\b", Pattern.MULTILINE);
+
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
     public JavaParser(Map<String, ConfigItem<?>> configMap) {
@@ -121,23 +164,21 @@ public class JavaParser extends AbstractParser {
         return buildFallbackResult(DataQuality.FILE, remark);
     }
 
-    protected ParseResult<CompilationUnit> parseWithAST(String content) {
-        ParserConfiguration parserConfig = new ParserConfiguration();
-        parserConfig.setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17);
-        parserConfig.setStoreTokens(true);
+    private static com.github.javaparser.JavaParser createAstParser() {
+        ParserConfiguration config = new ParserConfiguration();
+        config.setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17);
+        config.setStoreTokens(true);
+        return new com.github.javaparser.JavaParser(config);
+    }
 
-        com.github.javaparser.JavaParser parser = new com.github.javaparser.JavaParser(parserConfig);
-        return parser.parse(ParseStart.COMPILATION_UNIT, new StringProvider(content));
+    protected ParseResult<CompilationUnit> parseWithAST(String content) {
+        return AST_PARSER.get().parse(ParseStart.COMPILATION_UNIT, new StringProvider(content));
     }
 
     private @NonNull List<Entity> extractWithRegex(String content) {
         List<Entity> entities = new ArrayList<>();
 
-        java.util.regex.Pattern classPattern = java.util.regex.Pattern.compile(
-                "(?:public\\s+|private\\s+|protected\\s+)?(?:abstract\\s+|final\\s+)?class\\s+(\\w+)",
-                java.util.regex.Pattern.MULTILINE
-        );
-        java.util.regex.Matcher classMatcher = classPattern.matcher(content);
+        java.util.regex.Matcher classMatcher = CLASS_DECL_PATTERN.matcher(content);
         while (classMatcher.find()) {
             String className = classMatcher.group(1);
             String packageName = extractPackageName(content);
@@ -148,11 +189,7 @@ public class JavaParser extends AbstractParser {
                     .build());
         }
 
-        java.util.regex.Pattern methodPattern = java.util.regex.Pattern.compile(
-                "(?:public\\s+|private\\s+|protected\\s+)?(?:static\\s+)?(?:\\w+\\s+)+(\\w+)\\s*\\(([^)]*)\\)\\s*(?:throws\\s+\\w+)?\\s*\\{",
-                java.util.regex.Pattern.MULTILINE
-        );
-        java.util.regex.Matcher methodMatcher = methodPattern.matcher(content);
+        java.util.regex.Matcher methodMatcher = METHOD_DECL_PATTERN.matcher(content);
         String packageName = extractPackageName(content);
         while (methodMatcher.find()) {
             String methodName = methodMatcher.group(1);
@@ -171,21 +208,13 @@ public class JavaParser extends AbstractParser {
     }
 
     private String extractPackageName(String content) {
-        java.util.regex.Pattern pkgPattern = java.util.regex.Pattern.compile(
-                "^\\s*package\\s+([\\w.]+)\\s*;",
-                java.util.regex.Pattern.MULTILINE
-        );
-        java.util.regex.Matcher matcher = pkgPattern.matcher(content);
+        java.util.regex.Matcher matcher = PKG_PATTERN.matcher(content);
         return matcher.find() ? matcher.group(1) : "";
     }
 
     private String findParentClass(@NonNull String content, int methodPos) {
         String before = content.substring(0, methodPos);
-        java.util.regex.Pattern classPattern = java.util.regex.Pattern.compile(
-                "class\\s+(\\w+)\\s*\\{?\\s*$",
-                java.util.regex.Pattern.MULTILINE
-        );
-        java.util.regex.Matcher matcher = classPattern.matcher(before);
+        java.util.regex.Matcher matcher = PARENT_CLASS_PATTERN.matcher(before);
         String lastClass = "Unknown";
         while (matcher.find()) {
             lastClass = matcher.group(1);
@@ -292,14 +321,50 @@ public class JavaParser extends AbstractParser {
                 .build();
     }
 
+    /**
+     * 直接解析 sourceCode 为 entity map，绕过 executor（用于 parseChangeNatureFlags 内部并行，
+     * 避免与外层 executor.submit 形成嵌套提交链导致死锁）。
+     */
+    private Map<String, Entity> parseEntityMapDirect(SourceCode sourceCode) {
+        if (sourceCode == null || sourceCode.getContent() == null) {
+            return Collections.emptyMap();
+        }
+        try {
+            ParsingResult result = doParse(sourceCode);
+            return result.getEntities().stream()
+                    .collect(Collectors.toMap(Entity::getName, e -> e, (a, _) -> a));
+        } catch (Exception e) {
+            log.error("Direct parse error for {}", sourceCode.getFilePath(), e);
+            return Collections.emptyMap();
+        }
+    }
+
     @Override
     public List<EntityChange> parseChangeNatureFlags(SourceCode sourceCodeBefore, SourceCode sourceCodeAfter) {
         List<EntityChange> changes = new ArrayList<>();
 
-        Map<String, Entity> beforeEntities = sourceCodeBefore != null
-                ? parseEntityMap(sourceCodeBefore) : Collections.emptyMap();
-        Map<String, Entity> afterEntities = sourceCodeAfter != null
-                ? parseEntityMap(sourceCodeAfter) : Collections.emptyMap();
+        // ============ 变更 2: before / after 并行解析 ============
+        CompletableFuture<Map<String, Entity>> beforeFuture = CompletableFuture.supplyAsync(() ->
+                sourceCodeBefore != null ? parseEntityMapDirect(sourceCodeBefore) : Collections.emptyMap());
+        CompletableFuture<Map<String, Entity>> afterFuture = CompletableFuture.supplyAsync(() ->
+                sourceCodeAfter != null ? parseEntityMapDirect(sourceCodeAfter) : Collections.emptyMap());
+
+        Map<String, Entity> beforeEntities;
+        Map<String, Entity> afterEntities;
+        try {
+            beforeEntities = beforeFuture.get(getTimeoutMs(), TimeUnit.MILLISECONDS);
+            afterEntities = afterFuture.get(getTimeoutMs(), TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            beforeFuture.cancel(true);
+            afterFuture.cancel(true);
+            log.warn("Parallel parse timeout for change nature flags: {}ms", getTimeoutMs());
+            beforeEntities = Collections.emptyMap();
+            afterEntities = Collections.emptyMap();
+        } catch (Exception e) {
+            log.error("Parallel parse error for change nature flags: {}", e.getMessage());
+            beforeEntities = Collections.emptyMap();
+            afterEntities = Collections.emptyMap();
+        }
 
         SourceCode fileHint = sourceCodeAfter != null ? sourceCodeAfter : sourceCodeBefore;
         int testFlag = isTestFile(fileHint) ? ChangeNatureFlag.TEST.code : 0;
@@ -319,24 +384,59 @@ public class JavaParser extends AbstractParser {
 
         Set<String> addedNames = new HashSet<>(afterEntities.keySet());
         addedNames.removeAll(beforeEntities.keySet());
-        for (String name : addedNames) {
-            String afterBody = extractEntityBody(sourceCodeAfter, name);
-            int flags = parseEntityChangeNatureFlag(null, afterBody) | testFlag;
-            changes.add(EntityChange.builder()
-                    .before(null)
-                    .after(afterEntities.get(name))
-                    .flags(flags)
-                    .build());
-        }
 
         Set<String> removedNames = new HashSet<>(beforeEntities.keySet());
         removedNames.removeAll(afterEntities.keySet());
+
+        // ============ P0: 同文件 REFACTOR 检测 ============
+        // 对剩余 removed ↔ added 做 signature 相似度配对，匹配成功识别为重命名/提取/移动
+        Set<String> matchedAdded = new HashSet<>();
+        Set<String> matchedRemoved = new HashSet<>();
+
+        for (String removedName : removedNames) {
+            Entity removedEntity = beforeEntities.get(removedName);
+            for (String addedName : addedNames) {
+                if (matchedAdded.contains(addedName)) continue;
+
+                Entity addedEntity = afterEntities.get(addedName);
+                if (removedEntity.getKind() != addedEntity.getKind()) continue;
+
+                double similarity = computeStructuralSimilarityLocal(removedEntity, addedEntity);
+                if (similarity >= 0.7) {
+                    String beforeBody = extractEntityBody(sourceCodeBefore, removedName);
+                    String afterBody = extractEntityBody(sourceCodeAfter, addedName);
+                    int flags = (parseEntityChangeNatureFlag(beforeBody, afterBody)
+                            | ChangeNatureFlag.REFACTOR.code | testFlag);
+                    changes.add(EntityChange.builder()
+                            .before(removedEntity)
+                            .after(addedEntity)
+                            .flags(flags)
+                            .build());
+                    matchedAdded.add(addedName);
+                    matchedRemoved.add(removedName);
+                    break;
+                }
+            }
+        }
+
+        // 未配对的 removed / added 仍按 FEAT 处理
         for (String name : removedNames) {
+            if (matchedRemoved.contains(name)) continue;
             String beforeBody = extractEntityBody(sourceCodeBefore, name);
             int flags = parseEntityChangeNatureFlag(beforeBody, null) | testFlag;
             changes.add(EntityChange.builder()
                     .before(beforeEntities.get(name))
                     .after(null)
+                    .flags(flags)
+                    .build());
+        }
+        for (String name : addedNames) {
+            if (matchedAdded.contains(name)) continue;
+            String afterBody = extractEntityBody(sourceCodeAfter, name);
+            int flags = parseEntityChangeNatureFlag(null, afterBody) | testFlag;
+            changes.add(EntityChange.builder()
+                    .before(null)
+                    .after(afterEntities.get(name))
                     .flags(flags)
                     .build());
         }
@@ -353,10 +453,10 @@ public class JavaParser extends AbstractParser {
             return 0;
         }
 
+        // 空新增 / 空删除 → FEAT（PERF / FIX 信号只在 MODIFY 场景检测）
         if (beforeEmpty) {
             return ChangeNatureFlag.FEAT.code;
         }
-
         if (afterEmpty) {
             return ChangeNatureFlag.FEAT.code;
         }
@@ -378,10 +478,94 @@ public class JavaParser extends AbstractParser {
             return 0;
         }
 
+        // ======== 实质性变更：叠加 PERF / FIX 信号 ========
+        int flags = 0;
+
+        // FIX 信号 1：原有长度缩减规则
         if (sourceCodeAfter.length() < sourceCodeBefore.length() * 0.8) {
-            return ChangeNatureFlag.FIX.code;
+            flags |= ChangeNatureFlag.FIX.code;
         }
-        return ChangeNatureFlag.FEAT.code;
+        // FIX 信号 2：新增防御性编程模式
+        if (countFixSignals(sourceCodeBefore, sourceCodeAfter) > 0) {
+            flags |= ChangeNatureFlag.FIX.code;
+        }
+
+        // PERF 信号：after 中出现性能优化模式且 before 中没有
+        if (countPerfSignals(sourceCodeBefore, sourceCodeAfter) > 0) {
+            flags |= ChangeNatureFlag.PERF.code;
+        }
+
+        // 兜底：未命中任何特定信号 → FEAT
+        if (flags == 0) {
+            flags = ChangeNatureFlag.FEAT.code;
+        }
+        return flags;
+    }
+
+    /**
+     * 检测 after 中相比 before 新增的性能优化信号数量。
+     * 每个 Pattern 命中 1 次就算 1 个信号，不同 Pattern 独立计数后求和。
+     */
+    private int countPerfSignals(@NonNull String before, @NonNull String after) {
+        int afterHits = 0;
+        int beforeHits = 0;
+
+        afterHits += countMatches(PERF_CONCURRENT_HM, after);
+        beforeHits += countMatches(PERF_CONCURRENT_HM, before);
+
+        afterHits += countMatches(PERF_COMPUTE_IF_ABSENT, after);
+        beforeHits += countMatches(PERF_COMPUTE_IF_ABSENT, before);
+
+        afterHits += countMatches(PERF_PARALLEL_STREAM, after);
+        beforeHits += countMatches(PERF_PARALLEL_STREAM, before);
+
+        afterHits += countMatches(PERF_PREALLOCATED_COLL, after);
+        beforeHits += countMatches(PERF_PREALLOCATED_COLL, before);
+
+        afterHits += countMatches(PERF_PRIMITIVE, after);
+        beforeHits += countMatches(PERF_PRIMITIVE, before);
+
+        afterHits += countMatches(PERF_STRING_BUILDER, after);
+        beforeHits += countMatches(PERF_STRING_BUILDER, before);
+
+        return Math.max(0, afterHits - beforeHits);
+    }
+
+    /**
+     * 检测 after 中相比 before 新增的防御性编程信号数量。
+     */
+    private int countFixSignals(@NonNull String before, @NonNull String after) {
+        int afterHits = 0;
+        int beforeHits = 0;
+
+        afterHits += countMatches(FIX_NULL_CHECK, after);
+        beforeHits += countMatches(FIX_NULL_CHECK, before);
+
+        afterHits += countMatches(FIX_OBJECTS_NON_NULL, after);
+        beforeHits += countMatches(FIX_OBJECTS_NON_NULL, before);
+
+        afterHits += countMatches(FIX_BOUNDS_CHECK, after);
+        beforeHits += countMatches(FIX_BOUNDS_CHECK, before);
+
+        afterHits += countMatches(FIX_TRY_CATCH, after);
+        beforeHits += countMatches(FIX_TRY_CATCH, before);
+
+        afterHits += countMatches(FIX_THROW, after);
+        beforeHits += countMatches(FIX_THROW, before);
+
+        afterHits += countMatches(FIX_EARLY_RETURN, after);
+        beforeHits += countMatches(FIX_EARLY_RETURN, before);
+
+        return Math.max(0, afterHits - beforeHits);
+    }
+
+    private int countMatches(@NonNull Pattern pattern, @NonNull String input) {
+        int count = 0;
+        java.util.regex.Matcher m = pattern.matcher(input);
+        while (m.find()) {
+            count++;
+        }
+        return count;
     }
 
     private @NonNull String normalizeForComparison(String code) {
@@ -489,6 +673,88 @@ public class JavaParser extends AbstractParser {
                     return content.substring(start, end);
                 })
                 .orElse(node.toString());
+    }
+
+    // ============ 同文件 REFACTOR 相似度算法（从 core.AnalysisEngine 下沉一份独立实现） ============
+
+    private double computeStructuralSimilarityLocal(@NonNull Entity removed, @NonNull Entity added) {
+        String sig1 = removed.getSignature();
+        String sig2 = added.getSignature();
+
+        if (sig1 == null || sig2 == null || sig1.isEmpty() || sig2.isEmpty()) {
+            return 0.0;
+        }
+
+        if (removed.getKind() == EntityKind.METHOD) {
+            return computeMethodSimilarityLocal(sig1, sig2);
+        }
+        if (removed.getKind() == EntityKind.CLASS) {
+            return computeClassSimilarityLocal(sig1, sig2);
+        }
+        return 0.0;
+    }
+
+    private double computeMethodSimilarityLocal(@NonNull String sig1, @NonNull String sig2) {
+        String[] parts1 = sig1.split(":", 3);
+        String[] parts2 = sig2.split(":", 3);
+
+        if (parts1.length < 2 || parts2.length < 2) {
+            return 0.0;
+        }
+
+        // Method signature: returnType:params:bodyHash
+        // 重命名/参数调整后 returnType 和 params 应不变
+        if (!parts1[0].equals(parts2[0]) || !parts1[1].equals(parts2[1])) {
+            return 0.0;
+        }
+
+        // bodyHash 完全一致 → 1.0（纯重命名）
+        if (parts1.length == 3 && parts2.length == 3 && parts1[2].equals(parts2[2])) {
+            return 1.0;
+        }
+
+        // bodyHash 不同（方法提取/内联导致 hash 变了） → 0.7 阈值内刚好够
+        return 0.7;
+    }
+
+    private double computeClassSimilarityLocal(@NonNull String sig1, @NonNull String sig2) {
+        String[] parts1 = sig1.split(":", 4);
+        String[] parts2 = sig2.split(":", 4);
+
+        if (parts1.length < 4 || parts2.length < 4) {
+            return 0.0;
+        }
+
+        // Class signature: superName:interfaces:fieldCount:methodSigs
+        // 重命名不应改变继承 / 接口 / 字段数
+        if (!parts1[0].equals(parts2[0]) || !parts1[1].equals(parts2[1])) {
+            return 0.0;
+        }
+
+        double score;
+        if (!parts1[2].equals(parts2[2])) {
+            score = 0.3; // 字段数变了，但继承/接口相同
+        } else {
+            score = 0.6; // 字段数也没变
+        }
+
+        // 方法集合 Jaccard 相似度提升分
+        Set<String> methods1 = new HashSet<>(Arrays.asList(parts1[3].split(";")));
+        Set<String> methods2 = new HashSet<>(Arrays.asList(parts2[3].split(";")));
+        methods1.remove("");
+        methods2.remove("");
+
+        Set<String> intersection = new HashSet<>(methods1);
+        intersection.retainAll(methods2);
+        Set<String> union = new HashSet<>(methods1);
+        union.addAll(methods2);
+
+        if (!union.isEmpty()) {
+            double jaccard = (double) intersection.size() / union.size();
+            score = Math.min(1.0, score + jaccard * 0.4);
+        }
+
+        return score;
     }
 
     private int posToOffset(@NonNull String content, int line, int column) {
