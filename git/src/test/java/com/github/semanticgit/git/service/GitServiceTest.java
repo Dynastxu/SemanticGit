@@ -667,4 +667,55 @@ class GitServiceTest {
             assertFalse(collected.contains(h[1]));
         }
     }
+    @Nested
+    @DisplayName("mergeParentMeta")
+    class MergeParentMeta {
+
+        @Test
+        @DisplayName("merge commit 的 mergeParentMeta 应指向 second parent")
+        void mergeParentMetaSet() throws Exception {
+            // 构造：main: A ── C ── M
+            //                    /
+            //       feature:    B
+            repo.commitFile("a.txt", "A", "commit A");
+            String defaultBranch = service().getDefaultBranch();
+
+            repo.raw().checkout().setCreateBranch(true).setName("feature").call();
+            repo.commitFile("b.txt", "B", "commit B");
+            String hashB = repo.head();
+
+            repo.raw().checkout().setName(defaultBranch).call();
+            repo.commitFile("c.txt", "C", "commit C");
+
+            repo.raw().merge()
+                    .include(repo.raw().getRepository().resolve("feature"))
+                    .setCommit(true)
+                    .setMessage("merge feature")
+                    .call();
+            String hashM = repo.head();
+
+            CommitMeta merge = service().getAllCommits().stream()
+                    .filter(c -> c.getHash().equals(hashM))
+                    .findFirst().orElseThrow();
+
+            assertAll(
+                    () -> assertNotNull(merge.getMergeParentMeta()),
+                    () -> assertEquals(hashB, merge.getMergeParentMeta().getHash()),
+                    () -> assertEquals("commit B", merge.getMergeParentMeta().getMessage()),
+                    () -> assertEquals("Test User",
+                            merge.getMergeParentMeta().getAuthor().getName())
+            );
+        }
+
+        @Test
+        @DisplayName("非 merge 提交的 mergeParentMeta 应为 null")
+        void nonMergeHasNull() throws Exception {
+            repo.commitFile("a.txt", "A", "commit A");
+            repo.commitFile("b.txt", "B", "commit B");
+
+            service().getAllCommits().forEach(c ->
+                    assertNull(c.getMergeParentMeta(),
+                            "非 merge 提交 " + c.getHash() + " 的 mergeParentMeta 应为 null"));
+        }
+    }
 }
