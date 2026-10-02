@@ -64,5 +64,7 @@ public interface LanguageParser {
      *
      * @param configMap 被注册的配置项映射，键为配置项名称，值为配置项实例
      */
-    void registerConfigs(final Map<String, ConfigItem<?>> configMap);
+    default void registerConfigs(final Map<String, ConfigItem<?>> configMap) {
+        registerCommonConfigs(configMap);
+    }
 }

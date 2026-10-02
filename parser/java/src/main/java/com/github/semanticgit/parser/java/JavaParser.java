@@ -30,8 +30,10 @@ public class JavaParser extends AbstractParser {
     // 注意：javaparser.JavaParser 实例不是线程安全的，多线程共享同一个 parse() 调用会
     // 导致内部状态错乱（Lexer / TokenStore）→ 解析失败 → fallback 到 regex → entity
     // key 格式全错。因此用 ThreadLocal 隔离，每个线程独立实例。
-    private static final ThreadLocal<com.github.javaparser.JavaParser> AST_PARSER = ThreadLocal
-            .withInitial(JavaParser::createAstParser);
+    private static final String CONFIG_KEY_JAVA_LANGUAGE_LEVEL = "java_language_level";
+
+    private final ThreadLocal<com.github.javaparser.JavaParser> astParser = ThreadLocal
+            .withInitial(this::createAstParser);
 
     private static final Pattern CLASS_DECL_PATTERN = Pattern.compile(
             "(?:public\\s+|private\\s+|protected\\s+)?(?:abstract\\s+|final\\s+)?class\\s+(\\w+)",
@@ -75,7 +77,8 @@ public class JavaParser extends AbstractParser {
 
     @Override
     public void registerConfigs(Map<String, ConfigItem<?>> configMap) {
-        LanguageParser.registerCommonConfigs(configMap);
+        super.registerConfigs(configMap);
+        configMap.put(CONFIG_KEY_JAVA_LANGUAGE_LEVEL, new ConfigItem<>(ParserConfiguration.LanguageLevel.JAVA_25, null));
     }
 
     @Override
@@ -164,15 +167,20 @@ public class JavaParser extends AbstractParser {
         return buildFallbackResult(DataQuality.FILE, remark);
     }
 
-    private static com.github.javaparser.JavaParser createAstParser() {
+    private com.github.javaparser.@NonNull JavaParser createAstParser() {
         ParserConfiguration config = new ParserConfiguration();
-        config.setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17);
+        ParserConfiguration.LanguageLevel langLevel = ParserConfiguration.LanguageLevel.JAVA_25;
+        ConfigItem<?> langConfig = getConfig(CONFIG_KEY_JAVA_LANGUAGE_LEVEL);
+        if (langConfig != null && langConfig.getValue() instanceof ParserConfiguration.LanguageLevel) {
+            langLevel = (ParserConfiguration.LanguageLevel) langConfig.getValue();
+        }
+        config.setLanguageLevel(langLevel);
         config.setStoreTokens(true);
         return new com.github.javaparser.JavaParser(config);
     }
 
     protected ParseResult<CompilationUnit> parseWithAST(String content) {
-        return AST_PARSER.get().parse(ParseStart.COMPILATION_UNIT, new StringProvider(content));
+        return astParser.get().parse(ParseStart.COMPILATION_UNIT, new StringProvider(content));
     }
 
     private @NonNull List<Entity> extractWithRegex(String content) {
