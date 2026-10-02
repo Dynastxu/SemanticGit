@@ -10,19 +10,70 @@
             overflow: hidden;
             background: transparent;
         }
+
+        #chart {
+            opacity: 0;
+            transition: opacity 0.4s ease-in-out;
+        }
+
+        #chart.ready {
+            opacity: 1;
+        }
     </style>
 </head>
 <body>
 <div id="chart"></div>
 <script>
     var myChart = null;
+    var currentDarkMode = false;
+
+    function getThemeColors() {
+        if (currentDarkMode) {
+            return {
+                textColor: '#E2E2E6',
+                textColorSecondary: '#C3C7CF',
+                backgroundColor: 'transparent'
+            };
+        } else {
+            return {
+                textColor: '#1A1C1E',
+                textColorSecondary: '#43474E',
+                backgroundColor: 'transparent'
+            };
+        }
+    }
+
+    function setDarkMode(dark) {
+        if (currentDarkMode !== dark) {
+            currentDarkMode = dark;
+            if (myChart) {
+                var colors = getThemeColors();
+                var currentOption = myChart.getOption();
+                if (currentOption && currentOption.title) {
+                    currentOption.title[0].textStyle = currentOption.title[0].textStyle || {};
+                    currentOption.title[0].textStyle.color = colors.textColor;
+                }
+                if (currentOption && currentOption.legend) {
+                    currentOption.legend[0].textStyle = currentOption.legend[0].textStyle || {};
+                    currentOption.legend[0].textStyle.color = colors.textColorSecondary;
+                }
+                myChart.setOption(currentOption);
+            }
+        }
+    }
 
     function initChart() {
         if (typeof echarts === 'undefined') {
             console.error('ECharts 未加载！');
             return;
         }
+
+        var colors = getThemeColors();
+
         myChart = echarts.init(document.getElementById('chart'), null, { renderer: 'svg' });
+
+        var chartEl = document.getElementById('chart');
+        chartEl.classList.add('ready');
 
         myChart.on('click', function (params) {
             if (window.javaBridge && window.javaBridge.onChartClick) {
@@ -37,14 +88,21 @@
 
     function updateChart(option) {
         if (!myChart) {
-            // 如果还没初始化，延迟重试
             setTimeout(function () { updateChart(option); }, 50);
             return;
+        }
+        var colors = getThemeColors();
+        if (option && typeof option === 'object') {
+            if (option.title && option.title.textStyle === undefined) {
+                option.title.textStyle = { color: colors.textColor };
+            }
+            if (option.legend && option.legend.textStyle === undefined) {
+                option.legend.textStyle = { color: colors.textColorSecondary };
+            }
         }
         myChart.setOption(option, true);
     }
 
-    // 页面加载完成后立即初始化
     window.addEventListener('load', initChart);
 </script>
 </body>

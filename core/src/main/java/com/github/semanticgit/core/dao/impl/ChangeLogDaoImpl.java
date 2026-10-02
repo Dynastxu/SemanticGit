@@ -1,6 +1,7 @@
 package com.github.semanticgit.core.dao.impl;
 
 import com.github.semanticgit.common.entity.*;
+import com.github.semanticgit.common.exception.DatabaseOperationException;
 import com.github.semanticgit.core.dao.ChangeLogDao;
 import com.github.semanticgit.core.db.DatabaseManager;
 import com.github.semanticgit.core.dto.AuthorChangeStatistics;
@@ -47,6 +48,7 @@ public class ChangeLogDaoImpl implements ChangeLogDao {
             });
         } catch (Exception e) {
             log.error("Failed to save change log for commit {}: {}", changeLog.getCommit().getHash(), e.getMessage());
+            throw new DatabaseOperationException("Failed to save change log for commit: " + changeLog.getCommit().getHash(), e);
         }
     }
 
@@ -69,6 +71,7 @@ public class ChangeLogDaoImpl implements ChangeLogDao {
             log.info("Saved {} change logs to database", changeLogs.size());
         } catch (Exception e) {
             log.error("Failed to save change logs batch", e);
+            throw new DatabaseOperationException("Failed to save change logs batch", e);
         }
     }
 

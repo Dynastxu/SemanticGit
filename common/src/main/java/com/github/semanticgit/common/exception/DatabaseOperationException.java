@@ -1,0 +1,7 @@
+package com.github.semanticgit.common.exception;
+
+public class DatabaseOperationException extends RuntimeException {
+    public DatabaseOperationException(String message, Throwable cause) {
+        super(message, cause);
+    }
+}

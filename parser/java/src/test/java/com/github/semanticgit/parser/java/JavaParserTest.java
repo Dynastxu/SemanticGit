@@ -465,7 +465,7 @@ class JavaParserTest {
     // ==================== JavaParser 特有：registerConfigs ====================
 
     @Test
-    @DisplayName("registerConfigs 应注册三个通用配置项")
+    @DisplayName("registerConfigs 应注册四个通用配置项")
     void testRegisterConfigs() {
         JavaParser p = new JavaParser();
         Map<String, ConfigItem<?>> configMap = new HashMap<>();
@@ -474,6 +474,6 @@ class JavaParserTest {
         assertTrue(configMap.containsKey(LanguageParser.CONFIG_KEY_TIMEOUT));
         assertTrue(configMap.containsKey(LanguageParser.CONFIG_KEY_MAX_PARSE_SIZE));
         assertTrue(configMap.containsKey(LanguageParser.CONFIG_KEY_MAX_REGEX_SIZE));
-        assertEquals(3, configMap.size());
+        assertEquals(4, configMap.size());
     }
 }
