@@ -216,6 +216,13 @@ public class GitService implements AutoCloseable, IGitService {
         return result;
     }
 
+    /** 获取当前检出的分支短名。detached HEAD 时返回 null */
+    public @Nullable String getCurrentBranch() throws IOException {
+        String branch = repository.getBranch();
+        if (branch == null || branch.isEmpty()) return null;
+        return Repository.shortenRefName(branch);
+    }
+
     /** 探测默认分支名。优先级：origin/HEAD → main → master → 唯一本地分支 */
     public @Nullable String getDefaultBranch() throws IOException {
         Ref originHead = repository.exactRef("refs/remotes/origin/HEAD");
