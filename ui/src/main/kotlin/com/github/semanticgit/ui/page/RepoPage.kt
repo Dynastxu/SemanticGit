@@ -751,7 +751,7 @@ private suspend fun executeCoreAnalysis(
 ): AnalysisResult {
     return withContext(Dispatchers.IO) {
         try {
-            val dbDir = "${System.getProperty("user.home")}/.semanticgit/db"
+            val dbDir = "${System.getProperty("user.home", "")}/.semanticgit/db"
             val engine = AnalysisEngine()
             val dbName = Integer.toHexString(File(repoPath).absolutePath.hashCode())
             val dbFile = java.io.File(dbDir, "$dbName.db")

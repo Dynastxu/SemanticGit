@@ -11,12 +11,14 @@ import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Commit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.Category
 import androidx.compose.material.icons.outlined.Commit
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.Icons.Filled as FilledIcons
 import androidx.compose.material.icons.Icons.Outlined as OutlinedIcons
@@ -40,8 +42,11 @@ import androidx.compose.ui.window.WindowScope
 import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
-import com.github.semanticgit.ui.page.RepoPage
+import com.github.semanticgit.ui.page.AutoPortrait
 import com.github.semanticgit.ui.page.EntityAnalysis
+import com.github.semanticgit.ui.page.RepoPage
+import com.github.semanticgit.ui.page.Setting
+import com.github.semanticgit.ui.page.Submit
 import java.io.File
 
 fun main() = application {
@@ -65,9 +70,11 @@ fun main() = application {
         ProvideStrings(lyricist, LocalStrings) {
             SemanticGitTheme(themeMode = themeMode) {
                 SemanticGitApp(
-                    windowState = windowState,      // ← 新增传参
+                    windowState = windowState,
                     themeMode = themeMode,
                     onToggleTheme = { themeMode = if (themeMode == ThemeMode.Dark) ThemeMode.Light else ThemeMode.Dark },
+                    languageTag = lyricist.languageTag,
+                    onChangeLanguage = { lyricist.languageTag = it },
                     onClose = ::exitApplication
                 )
             }
@@ -81,6 +88,8 @@ private fun WindowScope.SemanticGitApp(
     windowState: WindowState,
     themeMode: ThemeMode,
     onToggleTheme: () -> Unit,
+    languageTag: String,
+    onChangeLanguage: (String) -> Unit,
     onClose: () -> Unit
 ) {
     var selectedIndex by remember { mutableStateOf(0) }
@@ -117,22 +126,28 @@ private fun WindowScope.SemanticGitApp(
             onClick = { selectedIndex = 1 }
         ),
         NavItem(
+            selectedIcon = FilledIcons.Person,
+            unselectedIcon = OutlinedIcons.Person,
+            title = strings.navAuthorPortrait,
+            onClick = { selectedIndex = 2 }
+        ),
+        NavItem(
             selectedIcon = FilledIcons.Commit,
             unselectedIcon = OutlinedIcons.Commit,
             title = strings.navCommit,
-            onClick = { selectedIndex = 2 }
+            onClick = { selectedIndex = 3 }
         ),
         NavItem(
             selectedIcon = FilledIcons.History,
             unselectedIcon = OutlinedIcons.History,
             title = strings.navHistory,
-            onClick = { selectedIndex = 3 }
+            onClick = { selectedIndex = 4 }
         ),
         NavItem(
             selectedIcon = FilledIcons.Build,
             unselectedIcon = OutlinedIcons.Build,
             title = strings.navTools,
-            onClick = { selectedIndex = 4 }
+            onClick = { selectedIndex = 5 }
         )
     )
 
@@ -141,7 +156,7 @@ private fun WindowScope.SemanticGitApp(
             selectedIcon = FilledIcons.Settings,
             unselectedIcon = OutlinedIcons.Settings,
             title = strings.navSettings,
-            onClick = { selectedIndex = 5 }
+            onClick = { selectedIndex = 6 }
         )
     )
 
@@ -179,6 +194,23 @@ private fun WindowScope.SemanticGitApp(
                         modifier = Modifier.fillMaxSize(),
                         repoPaths = repoPaths,
                         selectedRepoIndex = selectedRepoIndex
+                    )
+                    2 -> AutoPortrait(
+                        modifier = Modifier.fillMaxSize(),
+                        repoPaths = repoPaths,
+                        selectedRepoIndex = selectedRepoIndex
+                    )
+                    3 -> Submit(
+                        modifier = Modifier.fillMaxSize(),
+                        repoPaths = repoPaths,
+                        selectedRepoIndex = selectedRepoIndex
+                    )
+                    6 -> Setting(
+                        modifier = Modifier.fillMaxSize(),
+                        themeMode = themeMode,
+                        onToggleTheme = onToggleTheme,
+                        languageTag = languageTag,
+                        onChangeLanguage = onChangeLanguage
                     )
                     else -> Box(
                         modifier = Modifier.fillMaxSize().padding(16.dp),

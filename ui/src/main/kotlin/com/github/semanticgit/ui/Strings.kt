@@ -44,7 +44,29 @@ data class Strings(
     val flatListView: String,
     val traversalDfs: String,
     val traversalBfs: String,
-    val dbFileLoad: String
+    val dbFileLoad: String,
+    // Author Portrait
+    val authorPortrait: String,
+    val navAuthorPortrait: String,
+    val searchAuthorPlaceholder: String,
+    val authorOperationDistribution: String,
+    val authorNatureDistribution: String,
+    val noAuthorsFound: String,
+    val totalAuthors: String,
+    val loadingAuthors: String,
+    // Settings
+    val settingsTitle: String,
+    val settingsLanguage: String,
+    val settingsLanguageLabel: String,
+    val settingsLanguageZh: String,
+    val settingsLanguageEn: String,
+    val settingsAppearance: String,
+    val settingsAppearanceLabel: String,
+    val settingsAppearanceLight: String,
+    val settingsAppearanceDark: String,
+    val settingsAbout: String,
+    val settingsAboutVersion: String,
+    val settingsAboutDesc: String
 )
 
 val ZhStrings = Strings(
@@ -89,7 +111,29 @@ val ZhStrings = Strings(
     flatListView = "扁平列表视图",
     traversalDfs = "DFS (深度优先)",
     traversalBfs = "BFS (广度优先)",
-    dbFileLoad = "从数据库加载"
+    dbFileLoad = "从数据库加载",
+    // Author Portrait
+    authorPortrait = "作者画像",
+    navAuthorPortrait = "作者",
+    searchAuthorPlaceholder = "输入作者名搜索...",
+    authorOperationDistribution = "操作类型分布",
+    authorNatureDistribution = "变更性质分布",
+    noAuthorsFound = "未找到作者信息",
+    totalAuthors = "作者总数",
+    loadingAuthors = "加载中...",
+    // Settings
+    settingsTitle = "设置",
+    settingsLanguage = "语言",
+    settingsLanguageLabel = "界面语言",
+    settingsLanguageZh = "中文",
+    settingsLanguageEn = "English",
+    settingsAppearance = "外观",
+    settingsAppearanceLabel = "主题模式",
+    settingsAppearanceLight = "浅色模式",
+    settingsAppearanceDark = "深色模式",
+    settingsAbout = "关于",
+    settingsAboutVersion = "版本: 1.0.0",
+    settingsAboutDesc = "SemanticGit - 基于语义分析的 Git 可视化工具"
 )
 
 val EnStrings = Strings(
@@ -134,7 +178,29 @@ val EnStrings = Strings(
     flatListView = "Flat List View",
     traversalDfs = "DFS (Depth First)",
     traversalBfs = "BFS (Breadth First)",
-    dbFileLoad = "Load from Database"
+    dbFileLoad = "Load from Database",
+    // Author Portrait
+    authorPortrait = "Author Portrait",
+    navAuthorPortrait = "Authors",
+    searchAuthorPlaceholder = "Search author name...",
+    authorOperationDistribution = "Operation Distribution",
+    authorNatureDistribution = "Change Nature Distribution",
+    noAuthorsFound = "No authors found",
+    totalAuthors = "Total Authors",
+    loadingAuthors = "Loading...",
+    // Settings
+    settingsTitle = "Settings",
+    settingsLanguage = "Language",
+    settingsLanguageLabel = "Interface Language",
+    settingsLanguageZh = "中文",
+    settingsLanguageEn = "English",
+    settingsAppearance = "Appearance",
+    settingsAppearanceLabel = "Theme Mode",
+    settingsAppearanceLight = "Light Mode",
+    settingsAppearanceDark = "Dark Mode",
+    settingsAbout = "About",
+    settingsAboutVersion = "Version: 1.0.0",
+    settingsAboutDesc = "SemanticGit - Git Visualization Tool Based on Semantic Analysis"
 )
 
 val LocalStrings = staticCompositionLocalOf { ZhStrings }
