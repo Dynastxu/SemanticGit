@@ -29,6 +29,7 @@ data class Strings(
     // Entity Analysis
     val entityAnalysis: String,
     val searchEntity: String,
+    val searchEntityPlaceholder: String,
     val selectBranch: String,
     val startQuery: String,
     val querying: String,
@@ -38,7 +39,12 @@ data class Strings(
     val entityChangeHistory: String,
     val totalChanges: String,
     val noEntityHistoryFound: String,
-    val noMatchingEntities: String
+    val noMatchingEntities: String,
+    val dagGraphView: String,
+    val flatListView: String,
+    val traversalDfs: String,
+    val traversalBfs: String,
+    val dbFileLoad: String
 )
 
 val ZhStrings = Strings(
@@ -68,8 +74,9 @@ val ZhStrings = Strings(
     // Entity Analysis
     entityAnalysis = "实体变更分析",
     searchEntity = "搜索实体（全限定名）",
+    searchEntityPlaceholder = "输入实体名搜索...",
     selectBranch = "选择分支/Ref",
-    startQuery = "开始查询",
+    startQuery = "查询",
     querying = "查询中...",
     reset = "重置",
     pleaseInputEntityName = "请输入实体名称",
@@ -77,7 +84,12 @@ val ZhStrings = Strings(
     entityChangeHistory = "实体变更历史",
     totalChanges = "总变更数",
     noEntityHistoryFound = "未找到该实体的变更历史",
-    noMatchingEntities = "无匹配的实体"
+    noMatchingEntities = "无匹配的实体",
+    dagGraphView = "DAG 图谱视图",
+    flatListView = "扁平列表视图",
+    traversalDfs = "DFS (深度优先)",
+    traversalBfs = "BFS (广度优先)",
+    dbFileLoad = "从数据库加载"
 )
 
 val EnStrings = Strings(
@@ -107,6 +119,7 @@ val EnStrings = Strings(
     // Entity Analysis
     entityAnalysis = "Entity Tracking Analysis",
     searchEntity = "Search Entity (FQN)",
+    searchEntityPlaceholder = "Type entity name...",
     selectBranch = "Select Branch/Ref",
     startQuery = "Start Query",
     querying = "Querying...",
@@ -116,7 +129,12 @@ val EnStrings = Strings(
     entityChangeHistory = "Entity Change History",
     totalChanges = "Total Changes",
     noEntityHistoryFound = "No change history found for this entity",
-    noMatchingEntities = "No matching entities"
+    noMatchingEntities = "No matching entities",
+    dagGraphView = "DAG Graph View",
+    flatListView = "Flat List View",
+    traversalDfs = "DFS (Depth First)",
+    traversalBfs = "BFS (Breadth First)",
+    dbFileLoad = "Load from Database"
 )
 
 val LocalStrings = staticCompositionLocalOf { ZhStrings }

@@ -1,10 +1,13 @@
 package com.github.semanticgit.ui.page
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -14,12 +17,15 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -27,30 +33,41 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.github.semanticgit.common.entity.ChangeLog
 import com.github.semanticgit.common.entity.ChangeOperation
 import com.github.semanticgit.core.StatisticsProvider
+import com.github.semanticgit.core.dao.ChangeLogDao
 import com.github.semanticgit.core.db.DatabaseManager
 import com.github.semanticgit.core.dto.EntityChangeHistory
+import com.github.semanticgit.core.dto.HistoryEdge
+import com.github.semanticgit.core.dto.HistoryNode
 import com.github.semanticgit.ui.LocalStrings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -86,6 +103,13 @@ fun EntityAnalysis(
     var isLoading by remember { mutableStateOf(false) }
     var entityHistory by remember { mutableStateOf<EntityChangeHistory?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    // 遍历模式：DFS / BFS
+    var traversalMode by remember { mutableStateOf(ChangeLogDao.TraversalMode.DFS) }
+    var traversalDropdownExpanded by remember { mutableStateOf(false) }
+
+    // 视图模式：DAG 图 / 扁平列表
+    var showDagView by remember { mutableStateOf(true) }
 
     // 分支列表（从 Git 仓库动态获取）
     var branches by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -165,116 +189,181 @@ fun EntityAnalysis(
             return@Column
         }
 
-        // ============ 搜索框（带自动补全） ============
-        Column(modifier = Modifier.fillMaxWidth()) {
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { newValue ->
-                    searchQuery = newValue
-                    searchDropdownExpanded = newValue.isNotBlank()
-                            && allEntities.isNotEmpty()
-                },
-                label = { Text(strings.searchEntity) },
-                placeholder = { Text("com.example.MyClass#myMethod()") },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = "Search"
-                    )
-                },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            // 自动补全下拉列表（锚定在搜索框正下方）
-            if (searchDropdownExpanded) {
-                val filtered = allEntities
-                    .filter { it.contains(searchQuery, ignoreCase = true) }
-                    .sortedBy { it.indexOf(searchQuery, ignoreCase = true) }
-                    .take(20)
-
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 200.dp),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surface
-                    )
-                ) {
-                    if (filtered.isEmpty()) {
-                        Text(
-                            text = strings.noMatchingEntities,
-                            modifier = Modifier.padding(16.dp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodySmall
+        // ============ 查询工具栏 ============
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            // 搜索框（带自动补全）
+            Column(modifier = Modifier.weight(50f)) {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { newValue ->
+                        searchQuery = newValue
+                        searchDropdownExpanded = newValue.isNotBlank()
+                                && allEntities.isNotEmpty()
+                    },
+                    placeholder = { Text(strings.searchEntityPlaceholder) },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "Search",
+                            modifier = Modifier.size(18.dp)
                         )
-                    } else {
-                        LazyColumn {
-                            items(filtered) { entity ->
-                                Surface(
-                                    onClick = {
-                                        searchQuery = entity
-                                        searchDropdownExpanded = false
-                                    },
-                                    color = MaterialTheme.colorScheme.surface,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text(
-                                        text = entity,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
+                    },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                if (searchDropdownExpanded) {
+                    val filtered = allEntities
+                        .filter { it.contains(searchQuery, ignoreCase = true) }
+                        .sortedBy { it.indexOf(searchQuery, ignoreCase = true) }
+                        .take(20)
+
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 200.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surface
+                        )
+                    ) {
+                        if (filtered.isEmpty()) {
+                            Text(
+                                text = strings.noMatchingEntities,
+                                modifier = Modifier.padding(16.dp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        } else {
+                            LazyColumn {
+                                items(filtered) { entity ->
+                                    Surface(
+                                        onClick = {
+                                            searchQuery = entity
+                                            searchDropdownExpanded = false
+                                        },
+                                        color = MaterialTheme.colorScheme.surface,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            text = entity,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
-        }
 
-        // ============ 分支选择下拉列表 ============
-        ExposedDropdownMenuBox(
-            expanded = branchDropdownExpanded,
-            onExpandedChange = { branchDropdownExpanded = it }
-        ) {
-            OutlinedTextField(
-                value = selectedBranch.ifEmpty { strings.selectBranch },
-                onValueChange = {},
-                readOnly = true,
-                label = { Text(strings.selectBranch) },
-                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = branchDropdownExpanded) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .menuAnchor()
-            )
-            
-            ExposedDropdownMenu(
+            // 分支选择
+            ExposedDropdownMenuBox(
                 expanded = branchDropdownExpanded,
-                onDismissRequest = { branchDropdownExpanded = false }
+                onExpandedChange = { branchDropdownExpanded = it },
+                modifier = Modifier.weight(20f)
             ) {
-                branches.forEach { branch ->
+                OutlinedTextField(
+                    value = selectedBranch.ifEmpty { strings.selectBranch },
+                    onValueChange = {},
+                    readOnly = true,
+                    trailingIcon = {
+                        ExposedDropdownMenuDefaults.TrailingIcon(
+                            expanded = branchDropdownExpanded
+                        )
+                    },
+                    modifier = Modifier.menuAnchor(),
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyMedium
+                )
+
+                ExposedDropdownMenu(
+                    expanded = branchDropdownExpanded,
+                    onDismissRequest = { branchDropdownExpanded = false }
+                ) {
+                    branches.forEach { branch ->
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    branch,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            },
+                            onClick = {
+                                selectedBranch = branch
+                                branchDropdownExpanded = false
+                            },
+                            contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding
+                        )
+                    }
+                }
+            }
+
+            // 遍历模式
+            ExposedDropdownMenuBox(
+                expanded = traversalDropdownExpanded,
+                onExpandedChange = { traversalDropdownExpanded = it },
+                modifier = Modifier.weight(15f)
+            ) {
+                OutlinedTextField(
+                    value = if (traversalMode == ChangeLogDao.TraversalMode.DFS) "DFS" else "BFS",
+                    onValueChange = {},
+                    readOnly = true,
+                    trailingIcon = {
+                        ExposedDropdownMenuDefaults.TrailingIcon(
+                            expanded = traversalDropdownExpanded
+                        )
+                    },
+                    modifier = Modifier.menuAnchor(),
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyMedium
+                )
+                ExposedDropdownMenu(
+                    expanded = traversalDropdownExpanded,
+                    onDismissRequest = { traversalDropdownExpanded = false }
+                ) {
                     DropdownMenuItem(
-                        text = { Text(branch) },
+                        text = {
+                            Text(
+                                strings.traversalDfs,
+                                modifier = Modifier.fillMaxWidth(),
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        },
                         onClick = {
-                            selectedBranch = branch
-                            branchDropdownExpanded = false
+                            traversalMode = ChangeLogDao.TraversalMode.DFS
+                            traversalDropdownExpanded = false
+                        },
+                        contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding
+                    )
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                strings.traversalBfs,
+                                modifier = Modifier.fillMaxWidth(),
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        },
+                        onClick = {
+                            traversalMode = ChangeLogDao.TraversalMode.BFS
+                            traversalDropdownExpanded = false
                         },
                         contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding
                     )
                 }
             }
-        }
 
-        // ============ 操作按钮行 ============
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
+            // 查询按钮
             Button(
                 onClick = {
                     if (searchQuery.isBlank()) {
@@ -285,18 +374,19 @@ fun EntityAnalysis(
                         errorMessage = strings.pleaseSelectBranch
                         return@Button
                     }
-                    
+
                     scope.launch {
                         queryEntityChangeHistory(
                             repoPath = selectedPath!!,
                             entityName = searchQuery,
                             refName = selectedBranch,
+                            mode = traversalMode,
                             onLoading = { isLoading = it },
-                            onSuccess = { 
+                            onSuccess = {
                                 entityHistory = it
-                                errorMessage = null 
+                                errorMessage = null
                             },
-                            onError = { 
+                            onError = {
                                 errorMessage = it
                                 entityHistory = null
                             }
@@ -304,11 +394,11 @@ fun EntityAnalysis(
                     }
                 },
                 enabled = !isLoading && searchQuery.isNotBlank() && selectedBranch.isNotBlank(),
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(10f)
             ) {
                 if (isLoading) {
                     CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
+                        modifier = Modifier.size(16.dp),
                         strokeWidth = 2.dp,
                         color = MaterialTheme.colorScheme.onPrimary
                     )
@@ -316,14 +406,15 @@ fun EntityAnalysis(
                     Icon(
                         imageVector = Icons.Default.Search,
                         contentDescription = null,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(16.dp)
                     )
                 }
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(4.dp))
                 Text(if (isLoading) strings.querying else strings.startQuery)
             }
 
-            OutlinedButton(
+            // 重置按钮
+            IconButton(
                 onClick = {
                     searchQuery = ""
                     selectedBranch = ""
@@ -331,15 +422,13 @@ fun EntityAnalysis(
                     errorMessage = null
                     searchDropdownExpanded = false
                 },
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(5f)
             ) {
                 Icon(
                     imageVector = Icons.Default.Refresh,
-                    contentDescription = null,
+                    contentDescription = strings.reset,
                     modifier = Modifier.size(18.dp)
                 )
-                Spacer(Modifier.width(8.dp))
-                Text(strings.reset)
             }
         }
 
@@ -364,7 +453,11 @@ fun EntityAnalysis(
             EntityChangeHistoryCard(
                 entityName = searchQuery,
                 refName = selectedBranch,
-                changes = entityHistory!!.changes
+                changes = entityHistory!!.changes,
+                nodes = entityHistory!!.nodes,
+                edges = entityHistory!!.edges,
+                showDagView = showDagView,
+                onToggleView = { showDagView = it }
             )
         } else if (entityHistory != null && entityHistory!!.changes.isEmpty() && !isLoading) {
             Card(
@@ -398,16 +491,21 @@ fun EntityAnalysis(
 }
 
 /**
- * 实体变更历史卡片
+ * 实体变更历史卡片 — 支持 DAG 图谱视图和扁平列表视图切换
  */
 @Composable
 private fun EntityChangeHistoryCard(
     entityName: String,
     refName: String,
-    changes: List<ChangeLog>
+    changes: List<ChangeLog>,
+    nodes: List<HistoryNode>,
+    edges: List<HistoryEdge>,
+    showDagView: Boolean,
+    onToggleView: (Boolean) -> Unit
 ) {
     val strings = LocalStrings.current
-    
+    val hasNodes = nodes.isNotEmpty() && edges.isNotEmpty()
+
     Card(
         modifier = Modifier.fillMaxSize(),
         colors = CardDefaults.cardColors(
@@ -434,22 +532,233 @@ private fun EntityChangeHistoryCard(
                         color = MaterialTheme.colorScheme.primary
                     )
                 }
-                
+
                 Text(
                     text = "${strings.totalChanges}: ${changes.size}",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.secondary
                 )
             }
-            
+
+            // 视图切换控件 + 节点数统计
+            if (hasNodes) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = showDagView,
+                            onClick = { onToggleView(true) },
+                            label = { Text(strings.dagGraphView) },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.AccountTree,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        )
+                        FilterChip(
+                            selected = !showDagView,
+                            onClick = { onToggleView(false) },
+                            label = { Text(strings.flatListView) },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.List,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        )
+                    }
+                    Text(
+                        text = "${nodes.size} nodes",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-            
-            // 变更列表
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(changes, key = { it.id }) { changeLog ->
-                    ChangeLogItem(changeLog = changeLog)
+
+            // 内容区域
+            if (showDagView && hasNodes) {
+                DagGraphView(
+                    nodes = nodes,
+                    edges = edges,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                // 扁平列表视图
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(changes, key = { it.id }) { changeLog ->
+                        ChangeLogItem(changeLog = changeLog)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * DAG 图谱视图 — 使用 Canvas 绘制类似 git log --graph 的提交历史图谱
+ *
+ * - 实线 = FIRST_PARENT
+ * - 虚线 = MERGE_PARENT
+ * - merge commit 节点高亮（黄色实心圆 + [M] 标签）
+ */
+@Composable
+private fun DagGraphView(
+    nodes: List<HistoryNode>,
+    edges: List<HistoryEdge>,
+    modifier: Modifier = Modifier
+) {
+    val scrollState = rememberScrollState()
+    val textMeasurer = rememberTextMeasurer()
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val onSurface = MaterialTheme.colorScheme.onSurface
+    val mergeColor = Color(0xFFF9A825)
+
+    val rowHeight = 54.dp
+    val laneWidth = 22.dp
+    val nodeRadius = 5.dp
+    val labelStart = 70.dp
+    val textSize = 10.sp
+
+    val sorted = nodes.sortedBy { it.depth }
+
+    val nodeByHash = nodes.associateBy { it.commitHash }
+
+    val validEdges = edges.filter { it.toHash != null && it.fromHash != null }
+    val incomingEdges: Map<String, List<HistoryEdge>> = validEdges.groupBy { it.toHash }
+
+    val laneByHash = mutableMapOf<String, Int>()
+    var nextLane = 0
+
+    for (node in sorted) {
+        val incoming = incomingEdges[node.commitHash] ?: emptyList()
+        if (incoming.isNotEmpty()) {
+            val fromHash = incoming.first().fromHash
+            val parentLane = laneByHash[fromHash]
+            if (parentLane != null) {
+                laneByHash[node.commitHash] = parentLane
+            } else {
+                laneByHash[node.commitHash] = nextLane++
+            }
+        } else {
+            laneByHash[node.commitHash] = nextLane++
+        }
+    }
+
+    val maxLane = laneByHash.values.maxOrNull() ?: 0
+    val totalWidth = labelStart + 300.dp
+
+    Column(
+        modifier = modifier
+            .verticalScroll(scrollState)
+            .horizontalScroll(rememberScrollState())
+    ) {
+        Box(modifier = Modifier.width(totalWidth).height(rowHeight * sorted.size)) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val rowH = rowHeight.toPx()
+                val laneW = laneWidth.toPx()
+                val nodeR = nodeRadius.toPx()
+                val labelX = labelStart.toPx()
+                val centerYOffset = rowH * 0.55f
+
+                // 1. 画边
+                for (edge in validEdges) {
+                    val fromNode = nodeByHash[edge.fromHash] ?: continue
+                    val toNode = nodeByHash[edge.toHash] ?: continue
+                    val fromIdx = sorted.indexOfFirst { it.commitHash == fromNode.commitHash }
+                    val toIdx = sorted.indexOfFirst { it.commitHash == toNode.commitHash }
+                    if (fromIdx < 0 || toIdx < 0) continue
+
+                    val fromLane = laneByHash[edge.fromHash] ?: continue
+                    val toLane = laneByHash[edge.toHash] ?: continue
+
+                    val x1 = fromLane * laneW + laneW / 2
+                    val y1 = fromIdx * rowH + centerYOffset
+                    val x2 = toLane * laneW + laneW / 2
+                    val y2 = toIdx * rowH + centerYOffset
+
+                    if (edge.type == HistoryEdge.EdgeType.MERGE_PARENT) {
+                        drawLine(
+                            color = mergeColor,
+                            start = Offset(x1, y1),
+                            end = Offset(x2, y2),
+                            strokeWidth = 1.8f,
+                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 4f), 0f)
+                        )
+                    } else {
+                        drawLine(
+                            color = primaryColor,
+                            start = Offset(x1, y1),
+                            end = Offset(x2, y2),
+                            strokeWidth = 1.8f
+                        )
+                    }
+                }
+
+                // 2. 画节点圆 + 标签
+                for ((idx, node) in sorted.withIndex()) {
+                    val lane = laneByHash[node.commitHash] ?: continue
+                    val cx = lane * laneW + laneW / 2
+                    val cy = idx * rowH + centerYOffset
+
+                    val isMerge = node.isMergeCommit
+
+                    drawCircle(
+                        color = if (isMerge) mergeColor else primaryColor,
+                        radius = if (isMerge) nodeR + 2f else nodeR,
+                        center = Offset(cx, cy)
+                    )
+
+                    if (!isMerge) {
+                        drawCircle(
+                            color = Color.White,
+                            radius = nodeR * 0.45f,
+                            center = Offset(cx, cy)
+                        )
+                    }
+
+                    val labelText = "${node.commitHash.take(7)} ${node.shortMessage}"
+                    val textLayout = textMeasurer.measure(
+                        text = labelText,
+                        style = TextStyle(
+                            fontSize = textSize,
+                            color = onSurface
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
+                    drawText(
+                        textLayoutResult = textLayout,
+                        topLeft = Offset(labelX, idx * rowH + (rowH - textLayout.size.height) / 2)
+                    )
+
+                    if (isMerge) {
+                        val tagText = "[M]"
+                        val tagLayout = textMeasurer.measure(
+                            text = tagText,
+                            style = TextStyle(
+                                fontSize = 9.sp,
+                                color = mergeColor
+                            )
+                        )
+                        drawText(
+                            textLayoutResult = tagLayout,
+                            topLeft = Offset(
+                                labelX + textLayout.size.width + 6f,
+                                idx * rowH + (rowH - tagLayout.size.height) / 2
+                            )
+                        )
+                    }
                 }
             }
         }
@@ -530,14 +839,12 @@ private fun ChangeLogItem(changeLog: ChangeLog) {
 
 /**
  * 查询实体变更历史（异步）
- *
- * 直接调用 core 模块的 StatisticsProvider.getEntityChangeHistory() 接口，
- * 无需反射，类型安全且与 RepoPage 保持一致。
  */
 private suspend fun queryEntityChangeHistory(
     repoPath: String,
     entityName: String,
     refName: String,
+    mode: ChangeLogDao.TraversalMode,
     onLoading: (Boolean) -> Unit,
     onSuccess: (EntityChangeHistory) -> Unit,
     onError: (String) -> Unit
@@ -550,7 +857,7 @@ private suspend fun queryEntityChangeHistory(
 
         DatabaseManager(dbDir, dbName, false).use { dbManager ->
             val provider = StatisticsProvider(dbManager)
-            val result = provider.getEntityChangeHistory(entityName, refName)
+            val result = provider.getEntityChangeHistory(entityName, refName, mode)
             onSuccess(result)
         }
     } catch (e: Exception) {
