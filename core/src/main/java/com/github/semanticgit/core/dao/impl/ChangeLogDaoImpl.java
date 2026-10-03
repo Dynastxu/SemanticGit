@@ -204,21 +204,37 @@ public class ChangeLogDaoImpl implements ChangeLogDao {
         List<HistoryEdge> edges = new ArrayList<>();
 
         try {
-            Long headCommitId = resolveRefCommitId(refName);
-            if (headCommitId == null) {
-                log.warn("Ref not found: {}", refName);
-                return EntityChangeHistory.builder().changes(changes).nodes(nodes).edges(edges).build();
+            List<Long> headCommitIds;
+            if (refName != null && !refName.isEmpty()) {
+                Long headCommitId = resolveRefCommitId(refName);
+                if (headCommitId == null) {
+                    log.warn("Ref not found: {}", refName);
+                    return EntityChangeHistory.builder().changes(changes).nodes(nodes).edges(edges).build();
+                }
+                headCommitIds = List.of(headCommitId);
+            } else {
+                headCommitIds = resolveAllHeadCommitIds();
+                if (headCommitIds.isEmpty()) {
+                    log.warn("No head commits found");
+                    return EntityChangeHistory.builder().changes(changes).nodes(nodes).edges(edges).build();
+                }
             }
 
             debugEntityInfo(entityName);
             debugCommitParentStats();
 
+            Map<Long, CommitRow> allCommitRows = new HashMap<>();
+            Map<Long, List<ChangeLog>> changedCommits = new HashMap<>();
+
             dbManager.getJdbi().useHandle(handle -> {
                 Set<Long> visited = new HashSet<>();
                 Deque<Long> frontier = new LinkedList<>();
                 Map<Long, Integer> depthMap = new HashMap<>();
-                frontier.add(headCommitId);
-                depthMap.put(headCommitId, 0);
+
+                for (Long headId : headCommitIds) {
+                    frontier.add(headId);
+                    depthMap.put(headId, 0);
+                }
 
                 while (!frontier.isEmpty()) {
                     Long currentId = mode == TraversalMode.BFS
@@ -236,55 +252,81 @@ public class ChangeLogDaoImpl implements ChangeLogDao {
                         continue;
                     }
 
-                    boolean isMerge = row.mergeParentId != null;
-
-                    nodes.add(HistoryNode.builder()
-                            .commitHash(row.hash)
-                            .authorName(row.authorName)
-                            .timestamp(row.timestamp)
-                            .shortMessage(truncateMessage(row.message))
-                            .mergeCommit(isMerge)
-                            .depth(depth)
-                            .branchHint(isMerge ? "merged" : "main")
-                            .build());
+                    allCommitRows.put(currentId, row);
 
                     List<ChangeLog> commitChanges = queryChangeLogsForCommit(handle, currentId, entityName);
-                    changes.addAll(commitChanges);
-
-                    boolean firstEnqueued = false;
-
-                    if (row.parentCommitId != null) {
-                        edges.add(HistoryEdge.builder()
-                                .fromHash(row.hash)
-                                .toHash(row.parentHash)
-                                .type(EdgeType.FIRST_PARENT)
-                                .build());
-
-                        if (!visited.contains(row.parentCommitId)) {
-                            depthMap.put(row.parentCommitId, depth + 1);
-                            frontier.addLast(row.parentCommitId);
-                            firstEnqueued = true;
-                        }
+                    if (!commitChanges.isEmpty()) {
+                        changedCommits.put(currentId, commitChanges);
                     }
 
-                    if (row.mergeParentId != null) {
-                        edges.add(HistoryEdge.builder()
-                                .fromHash(row.hash)
-                                .toHash(row.mergeParentHash)
-                                .type(EdgeType.MERGE_PARENT)
-                                .build());
+                    if (row.parentCommitId != null && !visited.contains(row.parentCommitId)) {
+                        depthMap.put(row.parentCommitId, depth + 1);
+                        frontier.addLast(row.parentCommitId);
+                    }
 
-                        if (!visited.contains(row.mergeParentId)) {
-                            depthMap.put(row.mergeParentId, depth + 1);
-                            if (firstEnqueued) {
-                                frontier.addLast(row.mergeParentId);
-                            } else {
-                                frontier.addLast(row.mergeParentId);
-                            }
-                        }
+                    if (row.mergeParentId != null && !visited.contains(row.mergeParentId)) {
+                        depthMap.put(row.mergeParentId, depth + 1);
+                        frontier.addLast(row.mergeParentId);
                     }
                 }
             });
+
+            if (changedCommits.isEmpty()) {
+                return EntityChangeHistory.builder().changes(changes).nodes(nodes).edges(edges).build();
+            }
+
+            Map<Long, HistoryNode> nodeMap = new HashMap<>();
+            for (Map.Entry<Long, List<ChangeLog>> entry : changedCommits.entrySet()) {
+                Long commitId = entry.getKey();
+                CommitRow row = allCommitRows.get(commitId);
+
+                int changedDepth = calculateChangedDepth(commitId, changedCommits, allCommitRows, headCommitIds);
+
+                boolean isMerge = row.mergeParentId != null;
+                HistoryNode node = HistoryNode.builder()
+                        .commitHash(row.hash)
+                        .authorName(row.authorName)
+                        .timestamp(row.timestamp)
+                        .shortMessage(truncateMessage(row.message))
+                        .mergeCommit(isMerge)
+                        .depth(changedDepth)
+                        .branchHint(isMerge ? "merged" : "main")
+                        .build();
+                nodes.add(node);
+                nodeMap.put(commitId, node);
+                changes.addAll(entry.getValue());
+            }
+
+            Set<String> addedEdges = new HashSet<>();
+            for (Long commitId : changedCommits.keySet()) {
+                CommitRow row = allCommitRows.get(commitId);
+
+                Long firstParentAncestor = findNearestChangedAncestor(row.parentCommitId, changedCommits, allCommitRows);
+                if (firstParentAncestor != null) {
+                    String toHash = allCommitRows.get(firstParentAncestor).hash;
+                    String edgeKey = row.hash + "->" + toHash + ":FIRST_PARENT";
+                    if (addedEdges.add(edgeKey)) {
+                        edges.add(HistoryEdge.builder()
+                                .fromHash(row.hash)
+                                .toHash(toHash)
+                                .type(EdgeType.FIRST_PARENT)
+                                .build());
+                    }
+                }
+
+                Long mergeParentAncestor = findNearestChangedAncestor(row.mergeParentId, changedCommits, allCommitRows);
+                if (mergeParentAncestor != null && !mergeParentAncestor.equals(firstParentAncestor)) {
+                    String toHash = allCommitRows.get(mergeParentAncestor).hash;
+                    String edgeKey = row.hash + "->" + toHash + ":MERGE_PARENT";
+                    if (addedEdges.add(edgeKey)) {
+                        edges.add(HistoryEdge.builder()
+                                .fromHash(row.hash)
+                                .toHash(toHash)
+                                .type(EdgeType.MERGE_PARENT)
+                                .build());
+                    }
+                }
+            }
 
             changes.sort(Comparator.comparingInt(c -> -c.getCommit().getTimestamp()));
 
@@ -679,6 +721,58 @@ public class ChangeLogDaoImpl implements ChangeLogDao {
         } catch (Exception e) {
             log.debug("Debug query failed", e);
         }
+    }
+
+    private List<Long> resolveAllHeadCommitIds() {
+        try {
+            return dbManager.getJdbi().withHandle(handle ->
+                handle.createQuery("SELECT id FROM commit_meta WHERE parent_commit_id IS NULL")
+                    .mapTo(Long.class)
+                    .list()
+            );
+        } catch (Exception e) {
+            log.error("Failed to resolve all head commit ids", e);
+            return List.of();
+        }
+    }
+
+    private Long findNearestChangedAncestor(Long commitId, Map<Long, List<ChangeLog>> changedCommits, Map<Long, CommitRow> allRows) {
+        Long current = commitId;
+        Set<Long> visited = new HashSet<>();
+
+        while (current != null && visited.add(current)) {
+            if (changedCommits.containsKey(current)) {
+                return current;
+            }
+            CommitRow row = allRows.get(current);
+            if (row == null) {
+                break;
+            }
+            current = row.parentCommitId;
+        }
+        return null;
+    }
+
+    private int calculateChangedDepth(Long commitId, Map<Long, List<ChangeLog>> changedCommits, Map<Long, CommitRow> allRows, List<Long> headCommitIds) {
+        Set<Long> headSet = new HashSet<>(headCommitIds);
+        int changedCount = 0;
+        Long current = commitId;
+        Set<Long> visited = new HashSet<>();
+
+        while (current != null && visited.add(current)) {
+            if (changedCommits.containsKey(current)) {
+                changedCount++;
+            }
+            if (headSet.contains(current)) {
+                break;
+            }
+            CommitRow row = allRows.get(current);
+            if (row == null || row.parentCommitId == null) {
+                break;
+            }
+            current = row.parentCommitId;
+        }
+        return Math.max(0, changedCount - 1);
     }
 
     private Long resolveRefCommitId(String refName) {
