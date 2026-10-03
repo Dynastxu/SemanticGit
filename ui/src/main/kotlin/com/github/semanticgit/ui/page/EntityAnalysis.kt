@@ -504,7 +504,7 @@ private fun EntityChangeHistoryCard(
     onToggleView: (Boolean) -> Unit
 ) {
     val strings = LocalStrings.current
-    val hasNodes = nodes.isNotEmpty() && edges.isNotEmpty()
+    val hasNodes = nodes.isNotEmpty()
 
     Card(
         modifier = Modifier.fillMaxSize(),
@@ -623,11 +623,15 @@ private fun DagGraphView(
     val onSurface = MaterialTheme.colorScheme.onSurface
     val mergeColor = Color(0xFFF9A825)
 
-    val rowHeight = 54.dp
+    val rowHeight = 42.dp
     val laneWidth = 22.dp
     val nodeRadius = 5.dp
     val labelStart = 70.dp
-    val textSize = 10.sp
+    val textSize = 12.sp
+    val colHash = 70.dp
+    val colAuthor = 68.dp
+    val colTime = 118.dp
+    val colMessage = labelStart + colHash + colAuthor + colTime + 280.dp
 
     val sorted = nodes.sortedBy { it.depth }
 
@@ -655,7 +659,8 @@ private fun DagGraphView(
     }
 
     val maxLane = laneByHash.values.maxOrNull() ?: 0
-    val totalWidth = labelStart + 300.dp
+    val totalWidth = colMessage + 60.dp
+    val dateFormatter = remember { java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()) }
 
     Column(
         modifier = modifier
@@ -704,7 +709,11 @@ private fun DagGraphView(
                     }
                 }
 
-                // 2. 画节点圆 + 标签
+                // 2. 画节点圆 + 列式标签
+                val colHashPx = colHash.toPx()
+                val colAuthorPx = colAuthor.toPx()
+                val colTimePx = colTime.toPx()
+
                 for ((idx, node) in sorted.withIndex()) {
                     val lane = laneByHash[node.commitHash] ?: continue
                     val cx = lane * laneW + laneW / 2
@@ -726,38 +735,71 @@ private fun DagGraphView(
                         )
                     }
 
-                    val labelText = "${node.commitHash.take(7)} ${node.shortMessage}"
-                    val textLayout = textMeasurer.measure(
-                        text = labelText,
-                        style = TextStyle(
-                            fontSize = textSize,
-                            color = onSurface
+                    val textY = idx * rowH + (rowH - textMeasurer.measure(
+                        text = "Mg", style = TextStyle(fontSize = textSize)
+                    ).size.height) / 2f
+
+                    val textStyle = TextStyle(fontSize = textSize, color = onSurface)
+                    val dimStyle = TextStyle(fontSize = textSize, color = onSurface.copy(alpha = 0.7f))
+
+                    // hash
+                    val xHash = labelX
+                    drawText(
+                        textLayoutResult = textMeasurer.measure(
+                            text = node.commitHash.take(7),
+                            style = textStyle
                         ),
+                        topLeft = Offset(xHash, textY)
+                    )
+
+                    // author
+                    val xAuthor = labelX + colHashPx
+                    drawText(
+                        textLayoutResult = textMeasurer.measure(
+                            text = node.authorName.take(8),
+                            style = dimStyle
+                        ),
+                        topLeft = Offset(xAuthor, textY)
+                    )
+
+                    // time
+                    val timeStr = dateFormatter.format(java.util.Date(node.timestamp * 1000L))
+                    val xTime = labelX + colHashPx + colAuthorPx
+                    drawText(
+                        textLayoutResult = textMeasurer.measure(
+                            text = timeStr,
+                            style = dimStyle
+                        ),
+                        topLeft = Offset(xTime, textY)
+                    )
+
+                    // message
+                    val xMsg = labelX + colHashPx + colAuthorPx + colTimePx
+                    val msgLayout = textMeasurer.measure(
+                        text = node.shortMessage,
+                        style = textStyle,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+                    drawText(textLayoutResult = msgLayout, topLeft = Offset(xMsg, textY))
 
-                    drawText(
-                        textLayoutResult = textLayout,
-                        topLeft = Offset(labelX, idx * rowH + (rowH - textLayout.size.height) / 2)
-                    )
+                    var tagX = xMsg + msgLayout.size.width + 6f
 
                     if (isMerge) {
-                        val tagText = "[M]"
                         val tagLayout = textMeasurer.measure(
-                            text = tagText,
-                            style = TextStyle(
-                                fontSize = 9.sp,
-                                color = mergeColor
-                            )
+                            text = "[M]",
+                            style = TextStyle(fontSize = 10.sp, color = mergeColor)
                         )
-                        drawText(
-                            textLayoutResult = tagLayout,
-                            topLeft = Offset(
-                                labelX + textLayout.size.width + 6f,
-                                idx * rowH + (rowH - tagLayout.size.height) / 2
-                            )
+                        drawText(textLayoutResult = tagLayout, topLeft = Offset(tagX, textY))
+                        tagX += tagLayout.size.width + 4f
+                    }
+
+                    if (node.branchHint.isNotBlank() && node.branchHint != "main") {
+                        val branchLayout = textMeasurer.measure(
+                            text = "[${node.branchHint}]",
+                            style = TextStyle(fontSize = 10.sp, color = primaryColor.copy(alpha = 0.8f))
                         )
+                        drawText(textLayoutResult = branchLayout, topLeft = Offset(tagX, textY))
                     }
                 }
             }
