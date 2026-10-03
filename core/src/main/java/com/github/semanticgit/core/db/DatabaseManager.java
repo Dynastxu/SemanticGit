@@ -1,12 +1,16 @@
 package com.github.semanticgit.core.db;
 
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.jdbi.v3.core.Jdbi;
 
 import java.io.File;
+import java.sql.Connection;
+import java.sql.DriverManager;
 
 @Slf4j
 public class DatabaseManager implements AutoCloseable {
+    @Getter
     private final Jdbi jdbi;
 
     /**
@@ -32,16 +36,18 @@ public class DatabaseManager implements AutoCloseable {
         String dbUrl = "jdbc:sqlite:" + databaseFile.getAbsolutePath().replace("\\", "/");
         log.info("Database path: {}", dbUrl);
 
-        this.jdbi = Jdbi.create(dbUrl);
+        this.jdbi = Jdbi.create(() -> {
+            Connection conn = DriverManager.getConnection(dbUrl);
+            try (java.sql.Statement stmt = conn.createStatement()) {
+                stmt.execute("PRAGMA foreign_keys = ON");
+            }
+            return conn;
+        });
         initTables();
     }
 
     public DatabaseManager(File databaseFile) {
         this(databaseFile, false);
-    }
-
-    public Jdbi getJdbi() {
-        return jdbi;
     }
 
     private void initTables() {
