@@ -6,6 +6,7 @@ lombokPlugin = "9.5.0"
 javafxplugin = "0.1.0"
 foojay = "1.0.0"
 slf4j = "2.0.18"
+logback = "1.6.4"
 kotlinLogging = "7.0.6"
 jspecify = "1.0.1"
 jetbrainsAnnotations = "26.0.2"
@@ -19,6 +20,7 @@ lyricist = "1.8.0"
 
 [libraries]
 slf4j-simple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }
+logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
 kotlin-logging = { module = "io.github.oshai:kotlin-logging", version.ref = "kotlinLogging" }
 jspecify = { module = "org.jspecify:jspecify", version.ref = "jspecify" }
 jetbrains-annotations = { module = "org.jetbrains:annotations", version.ref = "jetbrainsAnnotations" }

@@ -31,7 +31,7 @@ subprojects {
     }
 
     dependencies {
-        implementation(versionCatalogLibs.slf4j.simple)
+        implementation(versionCatalogLibs.logback.classic)
         implementation(versionCatalogLibs.jspecify)
         compileOnly(versionCatalogLibs.jetbrains.annotations)
 

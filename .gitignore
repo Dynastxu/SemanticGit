@@ -39,3 +39,4 @@ build/
 /.env_local
 
 /.gradle/
+logs/

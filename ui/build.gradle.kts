@@ -41,6 +41,7 @@ dependencies {
     implementation(project(":core"))
     implementation(libs.lyricist)
     implementation(libs.kotlin.logging)
+    implementation(libs.logback.classic)
 }
 
 tasks.register<JavaExec>("runEChartsDemo") {
