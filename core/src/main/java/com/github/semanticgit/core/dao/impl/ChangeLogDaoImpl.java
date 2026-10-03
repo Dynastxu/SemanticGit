@@ -604,15 +604,25 @@ public class ChangeLogDaoImpl implements ChangeLogDao {
     }
 
     private @NonNull Long upsertEntity(Handle handle, Entity entity) {
-        return handle.createUpdate("""
-                            INSERT INTO entity (name, language, kind) VALUES (:name, :language, :kind)
-                            ON CONFLICT(name, language, kind) DO UPDATE SET name = excluded.name
-                            RETURNING id
-                        """)
+        Long existingId = handle.createQuery(
+                        "SELECT id FROM entity WHERE name = :name AND language = :language AND kind = :kind")
                 .bind("name", entity.getName())
                 .bind("language", entity.getLanguage().code)
                 .bind("kind", entity.getKind().code)
-                .executeAndReturnGeneratedKeys()
+                .mapTo(Long.class)
+                .findOne()
+                .orElse(null);
+
+        if (existingId != null) {
+            return existingId;
+        }
+
+        return handle.createUpdate(
+                        "INSERT INTO entity (name, language, kind) VALUES (:name, :language, :kind)")
+                .bind("name", entity.getName())
+                .bind("language", entity.getLanguage().code)
+                .bind("kind", entity.getKind().code)
+                .executeAndReturnGeneratedKeys("id")
                 .mapTo(Long.class)
                 .one();
     }
