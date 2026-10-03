@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.compose)
@@ -38,6 +40,7 @@ dependencies {
     implementation(compose.materialIconsExtended)
     implementation(project(":core"))
     implementation(libs.lyricist)
+    implementation(libs.kotlin.logging)
 }
 
 tasks.register<JavaExec>("runEChartsDemo") {

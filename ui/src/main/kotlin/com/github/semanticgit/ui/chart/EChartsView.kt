@@ -1,4 +1,4 @@
-@file:Suppress("removal")
+@file:Suppress("removal", "DEPRECATION")
 
 package com.github.semanticgit.ui.chart
 
@@ -8,6 +8,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.awt.SwingPanel
 import androidx.compose.ui.draw.alpha
+import io.github.oshai.kotlinlogging.KotlinLogging
 import javafx.application.Platform
 import javafx.concurrent.Worker
 import javafx.embed.swing.JFXPanel
@@ -15,6 +16,8 @@ import javafx.scene.Scene
 import javafx.scene.web.WebView
 import netscape.javascript.JSObject
 import javax.swing.SwingUtilities
+
+private val logger = KotlinLogging.logger {}
 
 /**
  * ★ 关键：JavaFX 平台全局初始化。
@@ -33,9 +36,9 @@ private object JavaFXBootstrap {
         try {
             Platform.setImplicitExit(false)
             initialized = true
-            println("✅ JavaFX setImplicitExit(false) 已设置")
+            logger.debug("JavaFX setImplicitExit(false) set")
         } catch (e: Exception) {
-            e.printStackTrace()
+            logger.error(e) { "JavaFX setImplicitExit(false) failed" }
         }
     }
 }
@@ -72,7 +75,7 @@ fun EChartsView(
                 val echartsJs = javaClass.getResourceAsStream("/echarts.min.js")
                     ?.bufferedReader()?.use { it.readText() }
                     ?: run {
-                        System.err.println("❌ 找不到 /echarts.min.js")
+                        logger.error("Cannot find /echarts.min.js")
                         ""
                     }
 
@@ -98,10 +101,10 @@ fun EChartsView(
                                 )
                                 setMember.invoke(window, "javaBridge", bridge)
                                 pageReady.value = true
-                                println("✅ javaBridge 注入成功")
+                                logger.debug("javaBridge mixin success")
                             }
                         } catch (e: Exception) {
-                            e.printStackTrace()
+                            logger.error(e) { "javaBridge mixin failed" }
                         }
                     }
                 }
@@ -110,7 +113,7 @@ fun EChartsView(
                 webViewRef.value = webView
                 jfxPanel.scene = Scene(webView)
             } catch (e: Exception) {
-                e.printStackTrace()
+                logger.error(e) { "EChartsView init failed" }
                 pageReady.value = false
             }
         }
@@ -123,7 +126,7 @@ fun EChartsView(
                     try {
                         applyOption(webView, optionJson)
                     } catch (e: Exception) {
-                        e.printStackTrace()
+                        logger.error(e) { "applyOption failed" }
                     }
                 }
             }
@@ -138,7 +141,7 @@ fun EChartsView(
                         val dark = if (darkMode) "true" else "false"
                         webView.engine.executeScript("setDarkMode($dark)")
                     } catch (e: Exception) {
-                        e.printStackTrace()
+                        logger.error(e) { "setDarkMode failed" }
                     }
                 }
             }
@@ -159,7 +162,7 @@ fun EChartsView(
                     webView?.engine?.loadWorker?.cancel()
                     jfxPanel.scene = null
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    logger.error(e) { "EChartsView dispose failed" }
                 }
             }
 
@@ -167,9 +170,9 @@ fun EChartsView(
             SwingUtilities.invokeLater {
                 try {
                     jfxPanel.parent?.remove(jfxPanel)
-                    println("🧹 JFXPanel 已从 AWT 移除")
+                    logger.debug("JFXPanel removed from AWT")
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    logger.error(e) { "EChartsView dispose failed" }
                 }
             }
         }
