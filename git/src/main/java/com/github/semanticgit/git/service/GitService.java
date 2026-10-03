@@ -107,9 +107,11 @@ public class GitService implements AutoCloseable, IGitService {
                                 .email(email)
                                 .build()
                 );
+
+                // ---- first parent（parentCommitMeta）----
                 CommitMeta parent = null;
                 if (rev.getParentCount() > 0) {
-                    RevCommit p = rev.getParent(0);
+                    RevCommit p = walk.parseCommit(rev.getParent(0).getId());  // ← 显式解析
                     PersonIdent pIdent = p.getAuthorIdent();
                     parent = CommitMeta.builder()
                             .hash(p.getId().getName())
@@ -123,12 +125,32 @@ public class GitService implements AutoCloseable, IGitService {
                             .message(p.getFullMessage())
                             .build();
                 }
+
+                // ---- second parent（mergeParentMeta）：仅 merge commit 时 ----
+                CommitMeta mergeParent = null;
+                if (rev.getParentCount() >= 2) {
+                    RevCommit mp = walk.parseCommit(rev.getParent(1).getId());  // ← 显式解析
+                    PersonIdent mpIdent = mp.getAuthorIdent();
+                    mergeParent = CommitMeta.builder()
+                            .hash(mp.getId().getName())
+                            .author(authorCache.computeIfAbsent(
+                                    mpIdent.getEmailAddress(),
+                                    email -> Author.builder()
+                                            .name(mpIdent.getName())
+                                            .email(email)
+                                            .build()))
+                            .timestamp(mp.getCommitTime())
+                            .message(mp.getFullMessage())
+                            .build();
+                }
+
                 result.add(CommitMeta.builder()
                         .hash(rev.getId().getName())
                         .author(author)
                         .timestamp(rev.getCommitTime())
                         .message(rev.getFullMessage())
                         .parentCommitMeta(parent)
+                        .mergeParentMeta(mergeParent)     // ← 新增这一行
                         .build());
             }
         }

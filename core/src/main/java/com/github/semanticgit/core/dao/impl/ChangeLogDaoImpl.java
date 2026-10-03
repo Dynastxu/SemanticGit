@@ -6,17 +6,26 @@ import com.github.semanticgit.core.dao.ChangeLogDao;
 import com.github.semanticgit.core.db.DatabaseManager;
 import com.github.semanticgit.core.dto.AuthorChangeStatistics;
 import com.github.semanticgit.core.dto.EntityChangeHistory;
+import com.github.semanticgit.core.dto.HistoryEdge;
+import com.github.semanticgit.core.dto.HistoryEdge.EdgeType;
+import com.github.semanticgit.core.dto.HistoryNode;
 import com.github.semanticgit.core.dto.StatRow;
 import lombok.extern.slf4j.Slf4j;
 import org.jdbi.v3.core.Handle;
 import org.jspecify.annotations.NonNull;
 
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.Deque;
 import java.util.EnumMap;
 import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.HexFormat;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Slf4j
 public class ChangeLogDaoImpl implements ChangeLogDao {
@@ -189,72 +198,257 @@ public class ChangeLogDaoImpl implements ChangeLogDao {
     }
 
     @Override
-    public EntityChangeHistory queryEntityChangeHistory(String entityName, String refName) {
+    public EntityChangeHistory queryEntityChangeHistory(String entityName, String refName, TraversalMode mode) {
         List<ChangeLog> changes = new ArrayList<>();
+        List<HistoryNode> nodes = new ArrayList<>();
+        List<HistoryEdge> edges = new ArrayList<>();
+
         try {
-            Long headCommitId = resolveRefCommitId(refName);
-            if (headCommitId == null) {
-                log.warn("Ref not found: {}", refName);
-                return EntityChangeHistory.builder().changes(changes).build();
+            List<Long> headCommitIds;
+            if (refName != null && !refName.isEmpty()) {
+                Long headCommitId = resolveRefCommitId(refName);
+                if (headCommitId == null) {
+                    log.warn("Ref not found: {}", refName);
+                    return EntityChangeHistory.builder().changes(changes).nodes(nodes).edges(edges).build();
+                }
+                headCommitIds = List.of(headCommitId);
+            } else {
+                headCommitIds = resolveAllHeadCommitIds();
+                if (headCommitIds.isEmpty()) {
+                    log.warn("No head commits found");
+                    return EntityChangeHistory.builder().changes(changes).nodes(nodes).edges(edges).build();
+                }
             }
 
             debugEntityInfo(entityName);
             debugCommitParentStats();
-            debugChainCount(entityName, headCommitId);
+
+            Map<Long, CommitRow> allCommitRows = new HashMap<>();
+            Map<Long, List<ChangeLog>> changedCommits = new HashMap<>();
 
             dbManager.getJdbi().useHandle(handle -> {
-                handle.createQuery("""
-                            WITH RECURSIVE commit_chain AS (
-                                SELECT cm.id, cm.parent_commit_id, cm.hash, cm.timestamp, cm.message,
-                                       a.name AS author_name, a.email AS author_email,
-                                       0 AS depth
-                                FROM commit_meta cm
-                                JOIN author a ON cm.author_id = a.id
-                                WHERE cm.id = :head_commit_id
-                                UNION ALL
-                                SELECT cm.id, cm.parent_commit_id, cm.hash, cm.timestamp, cm.message,
-                                       a.name AS author_name, a.email AS author_email,
-                                       cc.depth + 1
-                                FROM commit_meta cm
-                                JOIN author a ON cm.author_id = a.id
-                                JOIN commit_chain cc ON cm.id = cc.parent_commit_id
-                            )
-                            SELECT
-                                cl.id AS change_log_id,
-                                cc.hash AS commit_hash,
-                                cc.timestamp AS commit_timestamp,
-                                cc.message AS commit_message,
-                                cc.author_name,
-                                cc.author_email,
-                                e.id AS entity_id,
-                                e.name AS entity_name,
-                                e.language AS entity_language,
-                                e.kind AS entity_kind,
-                                cl.file_path,
-                                cl.operation,
-                                cl.nature_flag,
-                                cl.data_quality,
-                                cl.analysis_type,
-                                pe.id AS parent_entity_id,
-                                pe.name AS parent_entity_name,
-                                pe.language AS parent_entity_language,
-                                pe.kind AS parent_entity_kind
-                            FROM change_log cl
-                            JOIN entity e ON cl.entity_id = e.id
-                            JOIN commit_chain cc ON cl.commit_id = cc.id
-                            LEFT JOIN entity pe ON cl.parent_entity_id = pe.id
-                            WHERE e.name = :entity_name
-                            ORDER BY cc.depth DESC
-                            """)
-                        .bind("head_commit_id", headCommitId)
-                        .bind("entity_name", entityName)
-                        .map((rs, ctx) -> buildChangeLog(rs))
-                        .forEach(changes::add);
+                Set<Long> visited = new HashSet<>();
+                Deque<Long> frontier = new LinkedList<>();
+                Map<Long, Integer> depthMap = new HashMap<>();
+
+                for (Long headId : headCommitIds) {
+                    frontier.add(headId);
+                    depthMap.put(headId, 0);
+                }
+
+                while (!frontier.isEmpty()) {
+                    Long currentId = mode == TraversalMode.BFS
+                            ? frontier.pollFirst()
+                            : frontier.pollLast();
+
+                    if (!visited.add(currentId)) {
+                        continue;
+                    }
+
+                    int depth = depthMap.getOrDefault(currentId, 0);
+
+                    CommitRow row = queryCommitRow(handle, currentId);
+                    if (row == null) {
+                        continue;
+                    }
+
+                    allCommitRows.put(currentId, row);
+
+                    List<ChangeLog> commitChanges = queryChangeLogsForCommit(handle, currentId, entityName);
+                    if (!commitChanges.isEmpty()) {
+                        changedCommits.put(currentId, commitChanges);
+                    }
+
+                    if (row.parentCommitId != null && !visited.contains(row.parentCommitId)) {
+                        depthMap.put(row.parentCommitId, depth + 1);
+                        frontier.addLast(row.parentCommitId);
+                    }
+
+                    if (row.mergeParentId != null && !visited.contains(row.mergeParentId)) {
+                        depthMap.put(row.mergeParentId, depth + 1);
+                        frontier.addLast(row.mergeParentId);
+                    }
+                }
             });
+
+            if (changedCommits.isEmpty()) {
+                return EntityChangeHistory.builder().changes(changes).nodes(nodes).edges(edges).build();
+            }
+
+            Map<Long, HistoryNode> nodeMap = new HashMap<>();
+            for (Map.Entry<Long, List<ChangeLog>> entry : changedCommits.entrySet()) {
+                Long commitId = entry.getKey();
+                CommitRow row = allCommitRows.get(commitId);
+
+                int changedDepth = calculateChangedDepth(commitId, changedCommits, allCommitRows, headCommitIds);
+
+                boolean isMerge = row.mergeParentId != null;
+                HistoryNode node = HistoryNode.builder()
+                        .commitHash(row.hash)
+                        .authorName(row.authorName)
+                        .timestamp(row.timestamp)
+                        .shortMessage(truncateMessage(row.message))
+                        .mergeCommit(isMerge)
+                        .depth(changedDepth)
+                        .branchHint(isMerge ? "merged" : "main")
+                        .build();
+                nodes.add(node);
+                nodeMap.put(commitId, node);
+                changes.addAll(entry.getValue());
+            }
+
+            Set<String> addedEdges = new HashSet<>();
+            for (Long commitId : changedCommits.keySet()) {
+                CommitRow row = allCommitRows.get(commitId);
+
+                Long firstParentAncestor = findNearestChangedAncestor(row.parentCommitId, changedCommits, allCommitRows);
+                if (firstParentAncestor != null) {
+                    String toHash = allCommitRows.get(firstParentAncestor).hash;
+                    String edgeKey = row.hash + "->" + toHash + ":FIRST_PARENT";
+                    if (addedEdges.add(edgeKey)) {
+                        edges.add(HistoryEdge.builder()
+                                .fromHash(row.hash)
+                                .toHash(toHash)
+                                .type(EdgeType.FIRST_PARENT)
+                                .build());
+                    }
+                }
+
+                Long mergeParentAncestor = findNearestChangedAncestor(row.mergeParentId, changedCommits, allCommitRows);
+                if (mergeParentAncestor != null && !mergeParentAncestor.equals(firstParentAncestor)) {
+                    String toHash = allCommitRows.get(mergeParentAncestor).hash;
+                    String edgeKey = row.hash + "->" + toHash + ":MERGE_PARENT";
+                    if (addedEdges.add(edgeKey)) {
+                        edges.add(HistoryEdge.builder()
+                                .fromHash(row.hash)
+                                .toHash(toHash)
+                                .type(EdgeType.MERGE_PARENT)
+                                .build());
+                    }
+                }
+            }
+
+            changes.sort(Comparator.comparingInt(c -> -c.getCommit().getTimestamp()));
+
         } catch (Exception e) {
             log.error("Failed to query entity change history for entity={} ref={}", entityName, refName, e);
         }
-        return EntityChangeHistory.builder().changes(changes).build();
+        return EntityChangeHistory.builder().changes(changes).nodes(nodes).edges(edges).build();
+    }
+
+    private List<ChangeLog> queryChangeLogsForCommit(Handle handle, Long commitId, String entityName) {
+        return handle.createQuery("""
+                        SELECT
+                            cl.id AS change_log_id,
+                            cm.hash AS commit_hash,
+                            cm.timestamp AS commit_timestamp,
+                            cm.message AS commit_message,
+                            a.name AS author_name,
+                            a.email AS author_email,
+                            e.id AS entity_id,
+                            e.name AS entity_name,
+                            e.language AS entity_language,
+                            e.kind AS entity_kind,
+                            cl.file_path,
+                            cl.operation,
+                            cl.nature_flag,
+                            cl.data_quality,
+                            cl.analysis_type,
+                            pe.id AS parent_entity_id,
+                            pe.name AS parent_entity_name,
+                            pe.language AS parent_entity_language,
+                            pe.kind AS parent_entity_kind
+                        FROM change_log cl
+                        JOIN entity e ON cl.entity_id = e.id
+                        JOIN commit_meta cm ON cl.commit_id = cm.id
+                        JOIN author a ON cm.author_id = a.id
+                        LEFT JOIN entity pe ON cl.parent_entity_id = pe.id
+                        WHERE cl.commit_id = :commit_id AND e.name = :entity_name
+                        """)
+                .bind("commit_id", commitId)
+                .bind("entity_name", entityName)
+                .map((rs, ctx) -> buildChangeLog(rs))
+                .list();
+    }
+
+    private CommitRow queryCommitRow(Handle handle, Long commitId) {
+        return handle.createQuery("""
+                        SELECT cm.hash, cm.timestamp, cm.message,
+                               a.name AS author_name, a.email AS author_email,
+                               cm.parent_commit_id,
+                               p.hash AS parent_hash,
+                               cm.merge_parent_id,
+                               mp.hash AS merge_parent_hash
+                        FROM commit_meta cm
+                        JOIN author a ON cm.author_id = a.id
+                        LEFT JOIN commit_meta p ON cm.parent_commit_id = p.id
+                        LEFT JOIN commit_meta mp ON cm.merge_parent_id = mp.id
+                        WHERE cm.id = :id
+                        """)
+                .bind("id", commitId)
+                .map((rs, ctx) -> {
+                    byte[] hashBytes = rs.getBytes("hash");
+                    String hash = HexFormat.of().formatHex(hashBytes);
+
+                    long parentCommitId = rs.getLong("parent_commit_id");
+                    String parentHash = null;
+                    if (!rs.wasNull()) {
+                        byte[] phb = rs.getBytes("parent_hash");
+                        parentHash = HexFormat.of().formatHex(phb);
+                    }
+
+                    long mergeParentId = rs.getLong("merge_parent_id");
+                    String mergeParentHash = null;
+                    if (!rs.wasNull()) {
+                        byte[] mphb = rs.getBytes("merge_parent_hash");
+                        mergeParentHash = HexFormat.of().formatHex(mphb);
+                    }
+
+                    return new CommitRow(
+                            hash,
+                            rs.getString("author_name"),
+                            rs.getInt("timestamp"),
+                            rs.getString("message"),
+                            rs.wasNull() ? null : parentCommitId,
+                            parentHash,
+                            rs.wasNull() ? null : mergeParentId,
+                            mergeParentHash
+                    );
+                })
+                .findOne()
+                .orElse(null);
+    }
+
+    private String truncateMessage(String message) {
+        if (message == null) {
+            return "";
+        }
+        String firstLine = message.split("\\n")[0].trim();
+        return firstLine.length() > 60 ? firstLine.substring(0, 57) + "..." : firstLine;
+    }
+
+    private static class CommitRow {
+        final String hash;
+        final String authorName;
+        final int timestamp;
+        final String message;
+        final Long parentCommitId;
+        final String parentHash;
+        final Long mergeParentId;
+        final String mergeParentHash;
+
+        CommitRow(String hash, String authorName, int timestamp, String message,
+                  Long parentCommitId, String parentHash,
+                  Long mergeParentId, String mergeParentHash) {
+            this.hash = hash;
+            this.authorName = authorName;
+            this.timestamp = timestamp;
+            this.message = message;
+            this.parentCommitId = parentCommitId;
+            this.parentHash = parentHash;
+            this.mergeParentId = mergeParentId;
+            this.mergeParentHash = mergeParentHash;
+        }
     }
 
     @Override
@@ -392,6 +586,7 @@ public class ChangeLogDaoImpl implements ChangeLogDao {
                         SELECT cm.id
                         FROM commit_meta cm
                         JOIN commit_chain cc ON cm.id = cc.parent_commit_id
+                                               OR cm.id = cc.merge_parent_id
                     ),
                     commit_counts AS (
                         SELECT cl.commit_id, COUNT(*) AS cnt
@@ -470,13 +665,14 @@ public class ChangeLogDaoImpl implements ChangeLogDao {
             dbManager.getJdbi().useHandle(handle ->
                 handle.createQuery("""
                         WITH RECURSIVE commit_chain AS (
-                            SELECT cm.id, cm.parent_commit_id, cm.hash, 0 AS depth
+                            SELECT cm.id
                             FROM commit_meta cm
                             WHERE cm.id = :head_commit_id
                             UNION ALL
-                            SELECT cm.id, cm.parent_commit_id, cm.hash, cc.depth + 1
+                            SELECT cm.id
                             FROM commit_meta cm
                             JOIN commit_chain cc ON cm.id = cc.parent_commit_id
+                                                   OR cm.id = cc.merge_parent_id
                         )
                         SELECT COUNT(*) FROM commit_chain
                         """)
@@ -495,9 +691,9 @@ public class ChangeLogDaoImpl implements ChangeLogDao {
         try {
             dbManager.getJdbi().useHandle(handle ->
                 handle.createQuery(
-                    "SELECT COUNT(*) AS total, SUM(CASE WHEN parent_commit_id IS NOT NULL THEN 1 ELSE 0 END) AS with_parent FROM commit_meta")
+                    "SELECT COUNT(*) AS total, SUM(CASE WHEN parent_commit_id IS NOT NULL THEN 1 ELSE 0 END) AS with_parent, SUM(CASE WHEN merge_parent_id IS NOT NULL THEN 1 ELSE 0 END) AS with_merge_parent FROM commit_meta")
                     .map((rs, ctx) -> {
-                        log.debug("commit_meta: {} total, {} have parent_commit_id", rs.getInt("total"), rs.getInt("with_parent"));
+                        log.debug("commit_meta: {} total, {} have parent_commit_id, {} have merge_parent_id", rs.getInt("total"), rs.getInt("with_parent"), rs.getInt("with_merge_parent"));
                         return null;
                     })
                     .list()
@@ -525,6 +721,58 @@ public class ChangeLogDaoImpl implements ChangeLogDao {
         } catch (Exception e) {
             log.debug("Debug query failed", e);
         }
+    }
+
+    private List<Long> resolveAllHeadCommitIds() {
+        try {
+            return dbManager.getJdbi().withHandle(handle ->
+                handle.createQuery("SELECT id FROM commit_meta WHERE parent_commit_id IS NULL")
+                    .mapTo(Long.class)
+                    .list()
+            );
+        } catch (Exception e) {
+            log.error("Failed to resolve all head commit ids", e);
+            return List.of();
+        }
+    }
+
+    private Long findNearestChangedAncestor(Long commitId, Map<Long, List<ChangeLog>> changedCommits, Map<Long, CommitRow> allRows) {
+        Long current = commitId;
+        Set<Long> visited = new HashSet<>();
+
+        while (current != null && visited.add(current)) {
+            if (changedCommits.containsKey(current)) {
+                return current;
+            }
+            CommitRow row = allRows.get(current);
+            if (row == null) {
+                break;
+            }
+            current = row.parentCommitId;
+        }
+        return null;
+    }
+
+    private int calculateChangedDepth(Long commitId, Map<Long, List<ChangeLog>> changedCommits, Map<Long, CommitRow> allRows, List<Long> headCommitIds) {
+        Set<Long> headSet = new HashSet<>(headCommitIds);
+        int changedCount = 0;
+        Long current = commitId;
+        Set<Long> visited = new HashSet<>();
+
+        while (current != null && visited.add(current)) {
+            if (changedCommits.containsKey(current)) {
+                changedCount++;
+            }
+            if (headSet.contains(current)) {
+                break;
+            }
+            CommitRow row = allRows.get(current);
+            if (row == null || row.parentCommitId == null) {
+                break;
+            }
+            current = row.parentCommitId;
+        }
+        return Math.max(0, changedCount - 1);
     }
 
     private Long resolveRefCommitId(String refName) {

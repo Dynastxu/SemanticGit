@@ -3,6 +3,7 @@ package com.github.semanticgit.core;
 import com.github.semanticgit.common.entity.Author;
 import com.github.semanticgit.common.entity.CommitMeta;
 import com.github.semanticgit.common.entity.Entity;
+import com.github.semanticgit.core.dao.ChangeLogDao.TraversalMode;
 import com.github.semanticgit.core.dto.AuthorChangeStatistics;
 import com.github.semanticgit.core.dto.CommitEntityChangeStatistics;
 import com.github.semanticgit.core.dto.EntityChangeHistory;
@@ -21,12 +22,24 @@ interface IStatisticsProvider {
     CommitEntityChangeStatistics getCommitEntityChangeStatistics(String hash);
 
     /**
-     * Get the entity change history.
+     * Get the entity change history as a DAG (not a linear chain).
+     * Uses DFS (first-parent priority) by default.
      * @param entityName 实体全限定名
      * @param refName    ref全名（如 "refs/heads/main"），从此ref的HEAD向父提交遍历
-     * @return 实体变更历史记录
+     * @return 实体变更历史记录（含DAG节点和边）
      */
-    EntityChangeHistory getEntityChangeHistory(String entityName, String refName);
+    default EntityChangeHistory getEntityChangeHistory(String entityName, String refName) {
+        return getEntityChangeHistory(entityName, refName, TraversalMode.DFS);
+    }
+
+    /**
+     * Get the entity change history as a DAG (not a linear chain).
+     * @param entityName 实体全限定名
+     * @param refName    ref全名（如 "refs/heads/main"），从此ref的HEAD向父提交遍历
+     * @param mode       DAG遍历模式：DFS（深度优先，沿first-parent深入）或BFS（广度优先，逐层展开）
+     * @return 实体变更历史记录（含DAG节点和边）
+     */
+    EntityChangeHistory getEntityChangeHistory(String entityName, String refName, TraversalMode mode);
 
     /**
      * Get the author change statistics.

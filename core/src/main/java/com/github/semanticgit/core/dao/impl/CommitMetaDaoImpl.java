@@ -30,7 +30,9 @@ public class CommitMetaDaoImpl implements CommitMetaDao {
                 Long authorId = upsertAuthor(handle, commit.getAuthor());
                 CommitMeta parent = commit.getParentCommitMeta();
                 Long parentCommitId = resolveParentCommitId(handle, new HashMap<>(), parent);
-                upsertCommit(handle, commit, authorId, parentCommitId);
+                CommitMeta mergeParent = commit.getMergeParentMeta();
+                Long mergeParentId = resolveParentCommitId(handle, new HashMap<>(), mergeParent);
+                upsertCommit(handle, commit, authorId, parentCommitId, mergeParentId);
             });
         } catch (Exception e) {
             log.error("Failed to save commit: {}", commit.getHash(), e);
@@ -47,7 +49,9 @@ public class CommitMetaDaoImpl implements CommitMetaDao {
                     Long authorId = upsertAuthor(handle, commit.getAuthor());
                     CommitMeta parent = commit.getParentCommitMeta();
                     Long parentCommitId = resolveParentCommitId(handle, hashToId, parent);
-                    Long commitId = upsertCommit(handle, commit, authorId, parentCommitId);
+                    CommitMeta mergeParent = commit.getMergeParentMeta();
+                    Long mergeParentId = resolveParentCommitId(handle, hashToId, mergeParent);
+                    Long commitId = upsertCommit(handle, commit, authorId, parentCommitId, mergeParentId);
                     hashToId.put(commit.getHash(), commitId);
                 }
             });
@@ -64,14 +68,19 @@ public class CommitMetaDaoImpl implements CommitMetaDao {
         try {
             return dbManager.getJdbi().withHandle(handle ->
                 handle.createQuery("""
-                            SELECT cm.id, cm.timestamp, cm.message, cm.parent_commit_id,
+                            SELECT cm.id, cm.timestamp, cm.message, cm.parent_commit_id, cm.merge_parent_id,
                                    a.name, a.email,
                                    p.hash AS parent_hash, p.timestamp AS parent_timestamp, p.message AS parent_message,
-                                   pa.name AS parent_author_name, pa.email AS parent_author_email
+                                   pa.name AS parent_author_name, pa.email AS parent_author_email,
+                                   mp.hash AS merge_parent_hash, mp.timestamp AS merge_parent_timestamp,
+                                   mp.message AS merge_parent_message,
+                                   mpa.name AS merge_parent_author_name, mpa.email AS merge_parent_author_email
                             FROM commit_meta cm
                             JOIN author a ON cm.author_id = a.id
                             LEFT JOIN commit_meta p ON cm.parent_commit_id = p.id
                             LEFT JOIN author pa ON p.author_id = pa.id
+                            LEFT JOIN commit_meta mp ON cm.merge_parent_id = mp.id
+                            LEFT JOIN author mpa ON mp.author_id = mpa.id
                             WHERE cm.hash = :hash
                             """)
                     .bind("hash", hashBytes)
@@ -98,6 +107,23 @@ public class CommitMetaDaoImpl implements CommitMetaDao {
                                     .build();
                         }
 
+                        long mergeParentId = rs.getLong("merge_parent_id");
+                        CommitMeta mergeParentMeta = null;
+                        if (!rs.wasNull()) {
+                            byte[] mergeParentHashBytes = rs.getBytes("merge_parent_hash");
+                            Author mergeParentAuthor = Author.builder()
+                                    .name(rs.getString("merge_parent_author_name"))
+                                    .email(rs.getString("merge_parent_author_email"))
+                                    .build();
+                            mergeParentMeta = CommitMeta.builder()
+                                    .id(mergeParentId)
+                                    .hash(HexFormat.of().formatHex(mergeParentHashBytes))
+                                    .author(mergeParentAuthor)
+                                    .timestamp(rs.getInt("merge_parent_timestamp"))
+                                    .message(rs.getString("merge_parent_message"))
+                                    .build();
+                        }
+
                         return CommitMeta.builder()
                                 .id(rs.getLong("id"))
                                 .hash(hash)
@@ -105,6 +131,7 @@ public class CommitMetaDaoImpl implements CommitMetaDao {
                                 .timestamp(rs.getInt("timestamp"))
                                 .message(rs.getString("message"))
                                 .parentCommitMeta(parentCommitMeta)
+                                .mergeParentMeta(mergeParentMeta)
                                 .build();
                     })
                     .findOne()
@@ -124,11 +151,16 @@ public class CommitMetaDaoImpl implements CommitMetaDao {
                             SELECT cm.id, cm.hash, cm.timestamp, cm.message,
                                    a.name AS author_name, a.email AS author_email,
                                    p.hash AS parent_hash, p.timestamp AS parent_timestamp, p.message AS parent_message,
-                                   pa.name AS parent_author_name, pa.email AS parent_author_email
+                                   pa.name AS parent_author_name, pa.email AS parent_author_email,
+                                   mp.hash AS merge_parent_hash, mp.timestamp AS merge_parent_timestamp,
+                                   mp.message AS merge_parent_message,
+                                   mpa.name AS merge_parent_author_name, mpa.email AS merge_parent_author_email
                             FROM commit_meta cm
                             JOIN author a ON cm.author_id = a.id
                             LEFT JOIN commit_meta p ON cm.parent_commit_id = p.id
                             LEFT JOIN author pa ON p.author_id = pa.id
+                            LEFT JOIN commit_meta mp ON cm.merge_parent_id = mp.id
+                            LEFT JOIN author mpa ON mp.author_id = mpa.id
                             ORDER BY cm.timestamp DESC
                             """)
                     .map((rs, ctx) -> buildCommitMetaFromResultSet(rs))
@@ -234,6 +266,21 @@ public class CommitMetaDaoImpl implements CommitMetaDao {
                     .build();
         }
 
+        byte[] mergeParentHashBytes = rs.getBytes("merge_parent_hash");
+        CommitMeta mergeParentMeta = null;
+        if (!rs.wasNull()) {
+            Author mergeParentAuthor = Author.builder()
+                    .name(rs.getString("merge_parent_author_name"))
+                    .email(rs.getString("merge_parent_author_email"))
+                    .build();
+            mergeParentMeta = CommitMeta.builder()
+                    .hash(HexFormat.of().formatHex(mergeParentHashBytes))
+                    .author(mergeParentAuthor)
+                    .timestamp(rs.getInt("merge_parent_timestamp"))
+                    .message(rs.getString("merge_parent_message"))
+                    .build();
+        }
+
         return CommitMeta.builder()
                 .id(rs.getLong("id"))
                 .hash(hash)
@@ -241,6 +288,7 @@ public class CommitMetaDaoImpl implements CommitMetaDao {
                 .timestamp(rs.getInt("timestamp"))
                 .message(rs.getString("message"))
                 .parentCommitMeta(parentCommitMeta)
+                .mergeParentMeta(mergeParentMeta)
                 .build();
     }
 
@@ -284,7 +332,7 @@ public class CommitMetaDaoImpl implements CommitMetaDao {
     }
 
     private @NonNull Long upsertCommit(Handle handle, @NonNull CommitMeta commit,
-                                        Long authorId, Long parentCommitId) {
+                                        Long authorId, Long parentCommitId, Long mergeParentId) {
         byte[] hashBytes = HexFormat.of().parseHex(commit.getHash());
 
         Long existingId = handle.createQuery("SELECT id FROM commit_meta WHERE hash = :hash")
@@ -297,27 +345,30 @@ public class CommitMetaDaoImpl implements CommitMetaDao {
             handle.createUpdate("""
                         UPDATE commit_meta
                         SET author_id = :author_id, timestamp = :timestamp,
-                            message = :message, parent_commit_id = :parent_commit_id
+                            message = :message, parent_commit_id = :parent_commit_id,
+                            merge_parent_id = :merge_parent_id
                         WHERE id = :id
                     """)
                     .bind("author_id", authorId)
                     .bind("timestamp", commit.getTimestamp())
                     .bind("message", commit.getMessage())
                     .bind("parent_commit_id", parentCommitId)
+                    .bind("merge_parent_id", mergeParentId)
                     .bind("id", existingId)
                     .execute();
             return existingId;
         }
 
         handle.createUpdate("""
-                    INSERT INTO commit_meta (hash, author_id, timestamp, message, parent_commit_id)
-                    VALUES (:hash, :author_id, :timestamp, :message, :parent_commit_id)
+                    INSERT INTO commit_meta (hash, author_id, timestamp, message, parent_commit_id, merge_parent_id)
+                    VALUES (:hash, :author_id, :timestamp, :message, :parent_commit_id, :merge_parent_id)
                 """)
                 .bind("hash", hashBytes)
                 .bind("author_id", authorId)
                 .bind("timestamp", commit.getTimestamp())
                 .bind("message", commit.getMessage())
                 .bind("parent_commit_id", parentCommitId)
+                .bind("merge_parent_id", mergeParentId)
                 .execute();
 
         return handle.createQuery("SELECT id FROM commit_meta WHERE hash = :hash")
