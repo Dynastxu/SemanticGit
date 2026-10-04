@@ -79,9 +79,9 @@ data class ParserSettings(
     val maxRegexSizeBytes: Long get() = maxRegexSizeMb * 1024 * 1024
 }
 
-enum class AnalysisMode(val label: String) {
-    FULL("全量分析"),
-    INCREMENTAL("增量分析")
+enum class AnalysisMode {
+    FULL,
+    INCREMENTAL
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -258,7 +258,7 @@ fun RepoPage(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "点击「开始分析」查看结果",
+                            text = strings.repoClickToStart,
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -278,12 +278,14 @@ fun RepoPage(
                 onClick = { startAnalysis() },
                 enabled = selectedPath != null && !isAnalyzing
             ) {
+                val modeLabel = if (analysisMode == AnalysisMode.FULL)
+                    strings.repoAnalysisModeFull else strings.repoAnalysisModeIncremental
                 Text(
                     text = when {
-                        isAnalyzing -> "分析中..."
-                        configChanged -> "重新分析（配置已变更）"
-                        statistics != null -> "重新分析（${analysisMode.label}）"
-                        else -> "开始分析"
+                        isAnalyzing -> strings.repoAnalyzingButton
+                        configChanged -> strings.repoReanalyzeConfigChanged
+                        statistics != null -> "${strings.repoReanalyzePrefix}（${modeLabel}）"
+                        else -> strings.repoStartAnalysis
                     }
                 )
             }
@@ -304,6 +306,7 @@ private fun RepoSelector(
     onRepoSelected: (Int) -> Unit,
     onAddRepo: () -> Unit
 ) {
+    val strings = LocalStrings.current
     Row(
         modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -344,7 +347,7 @@ private fun RepoSelector(
         IconButton(onClick = onAddRepo) {
             Icon(
                 imageVector = Icons.Default.FolderOpen,
-                contentDescription = "选择仓库文件夹",
+                contentDescription = strings.repoSelectFolderContentDesc,
                 modifier = Modifier.size(24.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -368,6 +371,7 @@ private fun CollapsibleConfigPanel(
     analysisMode: AnalysisMode,
     onAnalysisModeChange: (AnalysisMode) -> Unit
 ) {
+    val strings = LocalStrings.current
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
@@ -379,14 +383,16 @@ private fun CollapsibleConfigPanel(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "分析配置",
+                    text = strings.repoAnalysisConfigTitle,
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onBackground
                 )
                 if (!expanded && !isAnalyzing) {
                     Spacer(modifier = Modifier.width(8.dp))
+                    val modeLabel = if (analysisMode == AnalysisMode.FULL)
+                        strings.repoAnalysisModeFull else strings.repoAnalysisModeIncremental
                     val summary = buildString {
-                        append(analysisMode.label)
+                        append(modeLabel)
                         append(" · ${timeoutMsText}ms · ${maxParseSizeMbText}MB")
                     }
                     Text(
@@ -399,7 +405,8 @@ private fun CollapsibleConfigPanel(
             Icon(
                 imageVector = if (expanded) Icons.Default.KeyboardArrowUp
                               else Icons.Default.KeyboardArrowDown,
-                contentDescription = if (expanded) "收起配置" else "展开配置",
+                contentDescription = if (expanded) strings.repoAnalysisConfigCollapse
+                                     else strings.repoAnalysisConfigExpand,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
@@ -436,6 +443,7 @@ private fun ConfigContent(
     analysisMode: AnalysisMode,
     onAnalysisModeChange: (AnalysisMode) -> Unit
 ) {
+    val strings = LocalStrings.current
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
@@ -444,7 +452,7 @@ private fun ConfigContent(
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = "分析模式",
+                text = strings.repoAnalysisModeSection,
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onBackground
             )
@@ -456,13 +464,15 @@ private fun ConfigContent(
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 AnalysisMode.entries.forEach { mode ->
+                    val modeLabel = if (mode == AnalysisMode.FULL)
+                        strings.repoAnalysisModeFull else strings.repoAnalysisModeIncremental
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         RadioButton(
                             selected = analysisMode == mode,
                             onClick = { onAnalysisModeChange(mode) }
                         )
                         Text(
-                            text = mode.label,
+                            text = modeLabel,
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurface
                         )
@@ -472,8 +482,8 @@ private fun ConfigContent(
 
             Text(
                 text = when (analysisMode) {
-                    AnalysisMode.FULL -> "重新分析所有提交，忽略已有数据"
-                    AnalysisMode.INCREMENTAL -> "仅分析上次分析之后的新提交"
+                    AnalysisMode.FULL -> strings.repoAnalysisModeFullDesc
+                    AnalysisMode.INCREMENTAL -> strings.repoAnalysisModeIncrementalDesc
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -484,7 +494,7 @@ private fun ConfigContent(
             Spacer(modifier = Modifier.height(12.dp))
 
             Text(
-                text = "解析配置",
+                text = strings.repoParseConfigSection,
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onBackground
             )
@@ -492,7 +502,7 @@ private fun ConfigContent(
             Spacer(modifier = Modifier.height(4.dp))
 
             Text(
-                text = "修改后需点击「开始分析」生效",
+                text = strings.repoParseConfigHint,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -502,7 +512,7 @@ private fun ConfigContent(
             NumberField(
                 value = timeoutMsText,
                 onValueChange = onTimeoutMsTextChange,
-                label = "单文件解析超时（毫秒）"
+                label = strings.repoFileTimeoutLabel
             )
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -510,7 +520,7 @@ private fun ConfigContent(
             NumberField(
                 value = maxParseSizeMbText,
                 onValueChange = onMaxParseSizeMbTextChange,
-                label = "超过此大小走文件级兜底（MB）"
+                label = strings.repoMaxParseSizeLabel
             )
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -518,7 +528,7 @@ private fun ConfigContent(
             NumberField(
                 value = maxRegexSizeMbText,
                 onValueChange = onMaxRegexSizeMbTextChange,
-                label = "正则降级最大文件大小（MB）"
+                label = strings.repoMaxRegexSizeLabel
             )
         }
     }
@@ -538,10 +548,10 @@ private fun AnalyzingView(strings: com.github.semanticgit.ui.Strings) {
     }
 
     val phase = when {
-        elapsedSeconds < 5 -> "正在读取仓库..."
-        elapsedSeconds < 20 -> "正在解析文件..."
-        elapsedSeconds < 60 -> "正在统计变更..."
-        else -> "正在生成图表..."
+        elapsedSeconds < 5 -> strings.repoAnalyzingPhase1
+        elapsedSeconds < 20 -> strings.repoAnalyzingPhase2
+        elapsedSeconds < 60 -> strings.repoAnalyzingPhase3
+        else -> strings.repoAnalyzingPhase4
     }
 
     Box(
@@ -570,13 +580,13 @@ private fun AnalyzingView(strings: com.github.semanticgit.ui.Strings) {
             )
             Spacer(modifier = Modifier.height(24.dp))
             Text(
-                text = "已用时：${elapsedSeconds} 秒",
+                text = strings.repoElapsedTime.replace("{0}", elapsedSeconds.toString()),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(modifier = Modifier.height(16.dp))
             Text(
-                text = "分析时间取决于仓库大小，请耐心等待",
+                text = strings.repoWaitPatiently,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
             )
