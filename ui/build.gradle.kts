@@ -21,16 +21,17 @@ tasks.withType<Test> {
 }
 
 val javafxSdkLib = "C:/Program Files/Java/javafx-sdk-25.0.4/lib"
+val commonJvmArgs = listOf(
+    "--enable-native-access=javafx.graphics,javafx.web,ALL-UNNAMED",
+    "--upgrade-module-path=$javafxSdkLib",
+    "--module-path=$javafxSdkLib",
+    "--add-modules=javafx.web,javafx.swing,jdk.jsobject"
+)
 
 compose.desktop {
     application {
         mainClass = "com.github.semanticgit.ui.AppKt"
-        jvmArgs += listOf(
-            "--enable-native-access=javafx.graphics,javafx.web,ALL-UNNAMED",
-            "--upgrade-module-path=$javafxSdkLib",
-            "--module-path=$javafxSdkLib",
-            "--add-modules=javafx.web,javafx.swing,jdk.jsobject"
-        )
+        jvmArgs += commonJvmArgs
     }
 }
 
@@ -45,14 +46,17 @@ dependencies {
 }
 
 tasks.register<JavaExec>("runEChartsDemo") {
-    group = "application"
-    description = "运行 ECharts Demo"
+    group = "demo"
+    description = "Run ECharts Demo"
     classpath = sourceSets["test"].runtimeClasspath
-    mainClass.set("com.github.semanticgit.ui.chart.EChartsViewDemoKt")
-    jvmArgs = listOf(
-        "--enable-native-access=javafx.graphics,javafx.web,ALL-UNNAMED",
-        "--upgrade-module-path=$javafxSdkLib",
-        "--module-path=$javafxSdkLib",
-        "--add-modules=javafx.web,javafx.swing,jdk.jsobject"
-    )
+    mainClass.set("com.github.semanticgit.ui.view.EChartsViewDemoKt")
+    jvmArgs = commonJvmArgs
+}
+
+tasks.register<JavaExec>("runDagListDemo") {
+    group = "demo"
+    description = "Run DAG List Demo"
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("com.github.semanticgit.ui.view.DagListViewDemoKt")
+    jvmArgs = commonJvmArgs
 }

@@ -1,6 +1,6 @@
 @file:Suppress("removal", "DEPRECATION")
 
-package com.github.semanticgit.ui.chart
+package com.github.semanticgit.ui.view
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
