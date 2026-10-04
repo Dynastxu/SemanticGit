@@ -135,7 +135,7 @@ fun Submit(
                     nodes = nodeList.sortedBy { it.depth }
                 }
             } catch (e: Exception) {
-                errorMessage = e.message ?: "Failed to load commits"
+                errorMessage = e.message ?: strings.commitFailedToLoad
                 allCommits = emptyList()
                 nodes = emptyList()
             } finally {
@@ -194,7 +194,7 @@ fun Submit(
 
     Column(modifier = modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
         Text(
-            text = "提交拓扑图",
+            text = strings.commitTopologyGraph,
             style = MaterialTheme.typography.headlineSmall
         )
 
@@ -239,7 +239,7 @@ fun Submit(
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("输入提交哈希或消息搜索...") },
+                    placeholder = { Text(strings.commitSearchPlaceholder) },
                     leadingIcon = {
                         Icon(
                             imageVector = Icons.Default.Search,
@@ -332,7 +332,9 @@ fun Submit(
         Spacer(modifier = Modifier.height(4.dp))
 
         Text(
-            text = "总提交数: ${allCommits.size}，匹配 ${filteredCommits.size} 条",
+            text = strings.commitTotalCount
+                .replace("{0}", allCommits.size.toString())
+                .replace("{1}", filteredCommits.size.toString()),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -347,7 +349,7 @@ fun Submit(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     CircularProgressIndicator()
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("加载中...", style = MaterialTheme.typography.bodyMedium)
+                    Text(strings.commitLoading, style = MaterialTheme.typography.bodyMedium)
                 }
             }
         } else if (errorMessage != null) {
@@ -371,12 +373,12 @@ fun Submit(
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        text = "未能分析提交",
+                        text = strings.commitAnalysisFailedTitle,
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = "请先分析仓库或检查数据库是否已加载",
+                        text = strings.commitAnalysisFailedHint,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -439,7 +441,7 @@ private fun CommitDetailPanel(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "点击提交节点查看详情",
+                        text = strings.commitClickDetailHint,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -451,7 +453,7 @@ private fun CommitDetailPanel(
             val dateFormatter = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
 
             Text(
-                text = "提交详情",
+                text = strings.commitDetail,
                 style = MaterialTheme.typography.titleSmall
             )
             Spacer(modifier = Modifier.height(8.dp))

@@ -1,10 +1,12 @@
 package com.github.semanticgit.ui.page
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -14,6 +16,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Search
@@ -27,7 +31,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -41,9 +44,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.github.semanticgit.common.entity.Author
 import com.github.semanticgit.common.entity.ChangeNatureFlag
 import com.github.semanticgit.common.entity.ChangeOperation
@@ -329,7 +335,7 @@ fun AutoPortrait(
                 )
                 if (searchQuery.isNotBlank()) {
                     Text(
-                        text = "匹配 ${filteredAuthors.size} 位",
+                        text = strings.authorMatchedCount.replace("{0}", filteredAuthors.size.toString()),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -398,6 +404,7 @@ private fun AuthorCard(
     author: Author,
     stats: AuthorChangeStatistics?
 ) {
+    val strings = LocalStrings.current
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -448,8 +455,6 @@ private fun AuthorCard(
                 HorizontalDivider()
                 Spacer(Modifier.height(12.dp))
 
-                val strings = LocalStrings.current
-
                 val opMap = stats.operationFloatMap
                 if (opMap.isNotEmpty()) {
                     Text(
@@ -476,7 +481,7 @@ private fun AuthorCard(
             } else {
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "暂无统计数据",
+                    text = strings.authorNoStatsData,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -488,9 +493,9 @@ private fun AuthorCard(
 @Composable
 private fun OperationDistribution(opMap: Map<ChangeOperation, Float>) {
     val opColors = mapOf(
-        ChangeOperation.ADD to Color(0xFF4CAF50),
-        ChangeOperation.MODIFY to Color(0xFFFFA726),
-        ChangeOperation.REMOVE to Color(0xFFEF5350)
+        ChangeOperation.ADD to Color(0xFF2E7D32),
+        ChangeOperation.MODIFY to Color(0xFFE65100),
+        ChangeOperation.REMOVE to Color(0xFFC62828)
     )
 
     val opLabels = mapOf(
@@ -499,43 +504,67 @@ private fun OperationDistribution(opMap: Map<ChangeOperation, Float>) {
         ChangeOperation.REMOVE to "DEL"
     )
 
-    val total = opMap.values.sum()
+    val entries = opMap.entries
+        .filter { it.value > 0f }
+        .sortedByDescending { it.value }
 
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        opMap.entries.sortedByDescending { it.value }.forEachIndexed { index, (op, value) ->
-            val fraction = if (total > 0f) value / total else 0f
-            val color = opColors[op] ?: Color.Gray
-            val label = opLabels[op] ?: op.name
+    if (entries.isEmpty()) return
 
-            Column(
-                modifier = if (index < opMap.size - 1) Modifier.weight(fraction) else Modifier
-            ) {
+    val total = entries.sumOf { it.value.toDouble() }.toFloat()
+
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(10.dp)
+                .clip(RoundedCornerShape(5.dp))
+        ) {
+            entries.forEach { (op, value) ->
+                val fraction = if (total > 0f) value / total else 0f
+                val color = opColors[op] ?: Color.Gray
+                if (fraction > 0.02f) {
+                    Box(
+                        modifier = Modifier
+                            .weight(fraction)
+                            .fillMaxHeight()
+                            .background(color)
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(6.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            entries.forEach { (op, value) ->
+                val fraction = if (total > 0f) value / total else 0f
+                val color = opColors[op] ?: Color.Gray
+                val label = opLabels[op] ?: op.name
+
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
-                    Text(
-                        text = label,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = color
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .background(color, CircleShape)
                     )
                     Text(
-                        text = "${"%.1f".format(value * 100)}%",
-                        style = MaterialTheme.typography.labelSmall,
+                        text = label,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "${"%.0f".format(fraction * 100)}%",
+                        fontSize = 10.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                Spacer(Modifier.height(2.dp))
-                LinearProgressIndicator(
-                    progress = { fraction.coerceIn(0f, 1f) },
-                    modifier = Modifier.fillMaxWidth().height(8.dp),
-                    color = color,
-                    trackColor = color.copy(alpha = 0.15f)
-                )
             }
         }
     }
@@ -544,13 +573,13 @@ private fun OperationDistribution(opMap: Map<ChangeOperation, Float>) {
 @Composable
 private fun NatureDistribution(nfMap: Map<ChangeNatureFlag, Float>) {
     val nfColors = mapOf(
-        ChangeNatureFlag.FEAT to Color(0xFF1976D2),
-        ChangeNatureFlag.FIX to Color(0xFFE53935),
-        ChangeNatureFlag.REFACTOR to Color(0xFF7B1FA2),
-        ChangeNatureFlag.PERF to Color(0xFF00897B),
-        ChangeNatureFlag.STYLE to Color(0xFFFDD835),
-        ChangeNatureFlag.TEST to Color(0xFF43A047),
-        ChangeNatureFlag.DOCS to Color(0xFF6D4C41)
+        ChangeNatureFlag.FEAT to Color(0xFF1565C0),
+        ChangeNatureFlag.FIX to Color(0xFFC62828),
+        ChangeNatureFlag.REFACTOR to Color(0xFF6A1B9A),
+        ChangeNatureFlag.PERF to Color(0xFF00695C),
+        ChangeNatureFlag.STYLE to Color(0xFF6D4C41),
+        ChangeNatureFlag.TEST to Color(0xFF2E7D32),
+        ChangeNatureFlag.DOCS to Color(0xFF37474F)
     )
 
     val nfLabels = mapOf(
@@ -563,43 +592,69 @@ private fun NatureDistribution(nfMap: Map<ChangeNatureFlag, Float>) {
         ChangeNatureFlag.DOCS to "DOCS"
     )
 
-    val total = nfMap.values.sum()
+    val entries = nfMap.entries
+        .filter { it.value > 0f }
+        .sortedByDescending { it.value }
 
-    Column(
-        verticalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        nfMap.entries
-            .sortedByDescending { it.value }
-            .forEach { (flag, value) ->
+    if (entries.isEmpty()) return
+
+    val total = entries.sumOf { it.value.toDouble() }.toFloat()
+
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(10.dp)
+                .clip(RoundedCornerShape(5.dp))
+        ) {
+            entries.forEach { (flag, value) ->
+                val fraction = if (total > 0f) value / total else 0f
+                val color = nfColors[flag] ?: Color.Gray
+                if (fraction > 0.02f) {
+                    Box(
+                        modifier = Modifier
+                            .weight(fraction)
+                            .fillMaxHeight()
+                            .background(color)
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(6.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            entries.forEach { (flag, value) ->
                 val fraction = if (total > 0f) value / total else 0f
                 val color = nfColors[flag] ?: Color.Gray
                 val label = nfLabels[flag] ?: flag.name
 
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .background(color, CircleShape)
+                    )
                     Text(
                         text = label,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = color,
-                        modifier = Modifier.width(44.dp)
-                    )
-                    LinearProgressIndicator(
-                        progress = { fraction.coerceIn(0f, 1f) },
-                        modifier = Modifier.weight(1f).height(8.dp),
-                        color = color,
-                        trackColor = color.copy(alpha = 0.15f)
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "${"%.1f".format(value * 100)}%",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.width(38.dp)
+                        text = "${"%.0f".format(fraction * 100)}%",
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
+        }
     }
 }
 

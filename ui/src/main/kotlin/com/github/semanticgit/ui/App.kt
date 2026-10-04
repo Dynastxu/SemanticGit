@@ -6,18 +6,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Commit
 import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.Category
 import androidx.compose.material.icons.outlined.Commit
 import androidx.compose.material.icons.outlined.Folder
-import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.Icons.Filled as FilledIcons
@@ -136,18 +132,6 @@ private fun WindowScope.SemanticGitApp(
             unselectedIcon = OutlinedIcons.Commit,
             title = strings.navCommit,
             onClick = { selectedIndex = 3 }
-        ),
-        NavItem(
-            selectedIcon = FilledIcons.History,
-            unselectedIcon = OutlinedIcons.History,
-            title = strings.navHistory,
-            onClick = { selectedIndex = 4 }
-        ),
-        NavItem(
-            selectedIcon = FilledIcons.Build,
-            unselectedIcon = OutlinedIcons.Build,
-            title = strings.navTools,
-            onClick = { selectedIndex = 5 }
         )
     )
 
@@ -156,7 +140,7 @@ private fun WindowScope.SemanticGitApp(
             selectedIcon = FilledIcons.Settings,
             unselectedIcon = OutlinedIcons.Settings,
             title = strings.navSettings,
-            onClick = { selectedIndex = 6 }
+            onClick = { selectedIndex = 4 }
         )
     )
 
@@ -205,7 +189,7 @@ private fun WindowScope.SemanticGitApp(
                         repoPaths = repoPaths,
                         selectedRepoIndex = selectedRepoIndex
                     )
-                    6 -> Setting(
+                    4 -> Setting(
                         modifier = Modifier.fillMaxSize(),
                         themeMode = themeMode,
                         onToggleTheme = onToggleTheme,
