@@ -1,65 +1,17 @@
 package com.github.semanticgit.ui.page
 
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccountTree
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.List
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.Button
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.drawText
-import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.github.semanticgit.common.entity.ChangeLog
 import com.github.semanticgit.common.entity.ChangeOperation
 import com.github.semanticgit.core.StatisticsProvider
@@ -69,6 +21,9 @@ import com.github.semanticgit.core.dto.EntityChangeHistory
 import com.github.semanticgit.core.dto.HistoryEdge
 import com.github.semanticgit.core.dto.HistoryNode
 import com.github.semanticgit.ui.LocalStrings
+import com.github.semanticgit.ui.view.Dag
+import com.github.semanticgit.ui.view.DagListView
+import com.github.semanticgit.ui.view.DagNode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -76,7 +31,7 @@ import java.io.File
 
 /**
  * 实体变更分析页面
- * 
+ *
  * 功能：
  * 1. 搜索框 - 输入实体全限定名进行搜索
  * 2. 分支选择下拉列表 - 选择 Git 分支/Ref
@@ -98,7 +53,7 @@ fun EntityAnalysis(
     var searchQuery by remember { mutableStateOf("") }
     var selectedBranch by remember { mutableStateOf("") }
     var branchDropdownExpanded by remember { mutableStateOf(false) }
-    
+
     // 分析状态
     var isLoading by remember { mutableStateOf(false) }
     var entityHistory by remember { mutableStateOf<EntityChangeHistory?>(null) }
@@ -504,7 +459,7 @@ private fun EntityChangeHistoryCard(
     onToggleView: (Boolean) -> Unit
 ) {
     val strings = LocalStrings.current
-    val hasNodes = nodes.isNotEmpty() && edges.isNotEmpty()
+    val hasNodes = nodes.isNotEmpty()
 
     Card(
         modifier = Modifier.fillMaxSize(),
@@ -585,11 +540,29 @@ private fun EntityChangeHistoryCard(
 
             // 内容区域
             if (showDagView && hasNodes) {
-                DagGraphView(
-                    nodes = nodes,
-                    edges = edges,
-                    modifier = Modifier.fillMaxSize()
-                )
+                val dag = remember(nodes, edges) { buildDag(nodes, edges) }
+                DagListView(
+                    dag = dag,
+                    comparator = compareByDescending { it.depth },
+                    modifier = Modifier.fillMaxSize(),
+                    rowHeight = 54.dp,
+                    laneWidth = 22.dp,
+                    nodeRadius = 5.dp,
+                ) { node ->
+                    Text(
+                        text = "${node.commitHash.take(7)} ${node.shortMessage}",
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (node.isMergeCommit) {
+                        Text(
+                            text = " [M]",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFFF9A825)
+                        )
+                    }
+                }
             } else {
                 // 扁平列表视图
                 LazyColumn(
@@ -604,165 +577,32 @@ private fun EntityChangeHistoryCard(
     }
 }
 
-/**
- * DAG 图谱视图 — 使用 Canvas 绘制类似 git log --graph 的提交历史图谱
- *
- * - 实线 = FIRST_PARENT
- * - 虚线 = MERGE_PARENT
- * - merge commit 节点高亮（黄色实心圆 + [M] 标签）
- */
-@Composable
-private fun DagGraphView(
-    nodes: List<HistoryNode>,
-    edges: List<HistoryEdge>,
-    modifier: Modifier = Modifier
-) {
-    val scrollState = rememberScrollState()
-    val textMeasurer = rememberTextMeasurer()
-    val primaryColor = MaterialTheme.colorScheme.primary
-    val onSurface = MaterialTheme.colorScheme.onSurface
-    val mergeColor = Color(0xFFF9A825)
-
-    val rowHeight = 54.dp
-    val laneWidth = 22.dp
-    val nodeRadius = 5.dp
-    val labelStart = 70.dp
-    val textSize = 10.sp
-
-    val sorted = nodes.sortedBy { it.depth }
-
+private fun buildDag(nodes: List<HistoryNode>, edges: List<HistoryEdge>): Dag<HistoryNode> {
     val nodeByHash = nodes.associateBy { it.commitHash }
+    val childHashByParent = mutableMapOf<String, MutableList<String>>()
+    val allChildHashes = mutableSetOf<String>()
 
-    val validEdges = edges.filter { it.toHash != null && it.fromHash != null }
-    val incomingEdges: Map<String, List<HistoryEdge>> = validEdges.groupBy { it.toHash }
-
-    val laneByHash = mutableMapOf<String, Int>()
-    var nextLane = 0
-
-    for (node in sorted) {
-        val incoming = incomingEdges[node.commitHash] ?: emptyList()
-        if (incoming.isNotEmpty()) {
-            val fromHash = incoming.first().fromHash
-            val parentLane = laneByHash[fromHash]
-            if (parentLane != null) {
-                laneByHash[node.commitHash] = parentLane
-            } else {
-                laneByHash[node.commitHash] = nextLane++
-            }
-        } else {
-            laneByHash[node.commitHash] = nextLane++
+    for (edge in edges) {
+        if (edge.fromHash != null && edge.toHash != null) {
+            childHashByParent.getOrPut(edge.fromHash) { mutableListOf() }.add(edge.toHash)
+            allChildHashes.add(edge.toHash)
         }
     }
 
-    val maxLane = laneByHash.values.maxOrNull() ?: 0
-    val totalWidth = labelStart + 300.dp
+    val rootHashes = nodes.map { it.commitHash }.filter { it !in allChildHashes }
 
-    Column(
-        modifier = modifier
-            .verticalScroll(scrollState)
-            .horizontalScroll(rememberScrollState())
-    ) {
-        Box(modifier = Modifier.width(totalWidth).height(rowHeight * sorted.size)) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val rowH = rowHeight.toPx()
-                val laneW = laneWidth.toPx()
-                val nodeR = nodeRadius.toPx()
-                val labelX = labelStart.toPx()
-                val centerYOffset = rowH * 0.55f
+    val dagNodeByHash = nodeByHash.mapValues { (_, node) ->
+        DagNode(data = node, children = emptyList())
+    }.toMutableMap()
 
-                // 1. 画边
-                for (edge in validEdges) {
-                    val fromNode = nodeByHash[edge.fromHash] ?: continue
-                    val toNode = nodeByHash[edge.toHash] ?: continue
-                    val fromIdx = sorted.indexOfFirst { it.commitHash == fromNode.commitHash }
-                    val toIdx = sorted.indexOfFirst { it.commitHash == toNode.commitHash }
-                    if (fromIdx < 0 || toIdx < 0) continue
-
-                    val fromLane = laneByHash[edge.fromHash] ?: continue
-                    val toLane = laneByHash[edge.toHash] ?: continue
-
-                    val x1 = fromLane * laneW + laneW / 2
-                    val y1 = fromIdx * rowH + centerYOffset
-                    val x2 = toLane * laneW + laneW / 2
-                    val y2 = toIdx * rowH + centerYOffset
-
-                    if (edge.type == HistoryEdge.EdgeType.MERGE_PARENT) {
-                        drawLine(
-                            color = mergeColor,
-                            start = Offset(x1, y1),
-                            end = Offset(x2, y2),
-                            strokeWidth = 1.8f,
-                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 4f), 0f)
-                        )
-                    } else {
-                        drawLine(
-                            color = primaryColor,
-                            start = Offset(x1, y1),
-                            end = Offset(x2, y2),
-                            strokeWidth = 1.8f
-                        )
-                    }
-                }
-
-                // 2. 画节点圆 + 标签
-                for ((idx, node) in sorted.withIndex()) {
-                    val lane = laneByHash[node.commitHash] ?: continue
-                    val cx = lane * laneW + laneW / 2
-                    val cy = idx * rowH + centerYOffset
-
-                    val isMerge = node.isMergeCommit
-
-                    drawCircle(
-                        color = if (isMerge) mergeColor else primaryColor,
-                        radius = if (isMerge) nodeR + 2f else nodeR,
-                        center = Offset(cx, cy)
-                    )
-
-                    if (!isMerge) {
-                        drawCircle(
-                            color = Color.White,
-                            radius = nodeR * 0.45f,
-                            center = Offset(cx, cy)
-                        )
-                    }
-
-                    val labelText = "${node.commitHash.take(7)} ${node.shortMessage}"
-                    val textLayout = textMeasurer.measure(
-                        text = labelText,
-                        style = TextStyle(
-                            fontSize = textSize,
-                            color = onSurface
-                        ),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-
-                    drawText(
-                        textLayoutResult = textLayout,
-                        topLeft = Offset(labelX, idx * rowH + (rowH - textLayout.size.height) / 2)
-                    )
-
-                    if (isMerge) {
-                        val tagText = "[M]"
-                        val tagLayout = textMeasurer.measure(
-                            text = tagText,
-                            style = TextStyle(
-                                fontSize = 9.sp,
-                                color = mergeColor
-                            )
-                        )
-                        drawText(
-                            textLayoutResult = tagLayout,
-                            topLeft = Offset(
-                                labelX + textLayout.size.width + 6f,
-                                idx * rowH + (rowH - tagLayout.size.height) / 2
-                            )
-                        )
-                    }
-                }
-            }
-        }
+    for ((parentHash, childHashes) in childHashByParent) {
+        val parentNode = dagNodeByHash[parentHash] ?: continue
+        val childNodes = childHashes.mapNotNull { dagNodeByHash[it] }
+        dagNodeByHash[parentHash] = parentNode.copy(children = childNodes)
     }
+
+    val rootNodes = rootHashes.mapNotNull { dagNodeByHash[it] }
+    return Dag(nodes = rootNodes)
 }
 
 /**
@@ -772,7 +612,7 @@ private fun DagGraphView(
 private fun ChangeLogItem(changeLog: ChangeLog) {
     val shortHash = changeLog.commit.hash.take(7)
     val parentInfo = changeLog.parentEntity?.let { " ← ${it.name}" } ?: ""
-    
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -790,11 +630,11 @@ private fun ChangeLogItem(changeLog: ChangeLog) {
                 // 操作类型标签
                 Surface(
                     color = when (changeLog.operation) {
-                        ChangeOperation.ADD -> 
+                        ChangeOperation.ADD ->
                             MaterialTheme.colorScheme.primaryContainer
-                        ChangeOperation.REMOVE -> 
+                        ChangeOperation.REMOVE ->
                             MaterialTheme.colorScheme.errorContainer
-                        ChangeOperation.MODIFY -> 
+                        ChangeOperation.MODIFY ->
                             MaterialTheme.colorScheme.secondaryContainer
                         else -> MaterialTheme.colorScheme.surfaceVariant
                     },
@@ -806,27 +646,27 @@ private fun ChangeLogItem(changeLog: ChangeLog) {
                         style = MaterialTheme.typography.labelSmall
                     )
                 }
-                
+
                 Text(
                     text = "$shortHash  ${changeLog.entity.name} (${changeLog.entity.kind})$parentInfo",
                     style = MaterialTheme.typography.bodyMedium
                 )
             }
-            
+
             // 第二行：作者 + 时间
             Text(
                 text = "${changeLog.commit.author.name} <${changeLog.commit.author.email}>  ${changeLog.commit.timestamp}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            
+
             // 第三行：文件路径
             Text(
                 text = "📄 ${changeLog.filePath}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            
+
             // 第四行：提交消息
             Text(
                 text = "💬 ${changeLog.commit.message.lines().first()}",
@@ -890,12 +730,12 @@ private suspend fun searchAllEntities(repoPath: String): List<String> = withCont
 
 /**
  * TODO: 待实现的接口 - 分支/Ref 列表服务
- * 
+ *
  * 功能：获取 Git 仓库的所有分支和 Ref
  * 用途：填充分支选择下拉列表
- * 
+ *
  * 示例实现位置：git 模块 或 core 模块
- * 
+ *
  * interface RefListService {
  *     /**
  *      * 获取所有 Ref 列表
@@ -903,14 +743,14 @@ private suspend fun searchAllEntities(repoPath: String): List<String> = withCont
  *      * @return Ref 名称列表（如 ["refs/heads/main", "refs/heads/develop", "refs/tags/v1.0"]）
  *      */
  *     fun getRefs(repoPath: String): List<String>
- *     
+ *
  *     /**
  *      * 获取所有本地分支
  *      * @param repoPath Git 仓库路径
  *      * @return 分支名称列表（如 ["main", "develop", "feature/x"]）
  *      */
  *     fun getLocalBranches(repoPath: String): List<String>
- *     
+ *
  *     /**
  *      * 获取所有远程分支
  *      * @param repoPath Git 仓库路径
