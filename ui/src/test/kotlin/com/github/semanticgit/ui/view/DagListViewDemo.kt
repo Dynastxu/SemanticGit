@@ -104,7 +104,9 @@ fun <T> computeLayout(ordered: List<DagNode<T>>): GraphLayout {
             .filter { rowOf[it] != null && rowOf[it]!! != row }
             .sortedBy { rowOf[it] }
         for (child in children) {
-            edges += E(row, rowOf[child]!!, globalLane[child]!!)
+            val sLane = globalLane[node]!!
+            val tLane = globalLane[child]!!
+            edges += E(row, rowOf[child]!!, maxOf(sLane, tLane))
         }
     }
 
