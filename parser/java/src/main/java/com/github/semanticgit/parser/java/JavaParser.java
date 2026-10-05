@@ -30,7 +30,7 @@ public class JavaParser extends AbstractParser {
     // 注意：javaparser.JavaParser 实例不是线程安全的，多线程共享同一个 parse() 调用会
     // 导致内部状态错乱（Lexer / TokenStore）→ 解析失败 → fallback 到 regex → entity
     // key 格式全错。因此用 ThreadLocal 隔离，每个线程独立实例。
-    private static final String CONFIG_KEY_JAVA_LANGUAGE_LEVEL = "java_language_level";
+    public static final String CONFIG_KEY_JAVA_LANGUAGE_LEVEL = "java_language_level";
 
     private final ThreadLocal<com.github.javaparser.JavaParser> astParser = ThreadLocal
             .withInitial(this::createAstParser);

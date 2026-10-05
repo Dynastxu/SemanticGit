@@ -56,36 +56,42 @@ import com.github.semanticgit.common.entity.ChangeNatureFlag
 import com.github.semanticgit.common.entity.ChangeOperation
 import com.github.semanticgit.core.AnalysisEngine
 import com.github.semanticgit.core.StatisticsProvider
+import com.github.semanticgit.core.config.EngineConfigs
 import com.github.semanticgit.core.db.DatabaseManager
 import com.github.semanticgit.core.dto.SimpleEntityChangeStatistics
 import com.github.semanticgit.core.parser.ParserRegistry
+import com.github.semanticgit.parser.java.JavaParser
 import com.github.semanticgit.parser.java.api.LanguageParser
 import com.github.semanticgit.ui.LocalStrings
 import com.github.semanticgit.ui.LocalThemeMode
 import com.github.semanticgit.ui.ThemeMode
 import com.github.semanticgit.ui.view.EChartsView
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import javax.swing.JFileChooser
+import kotlin.time.Duration.Companion.milliseconds
+
+private val logger = KotlinLogging.logger {}
 
 data class ParserSettings(
     val timeoutMs: Long = 5000L,
     val maxParseSizeMb: Long = 5L,
-    val maxRegexSizeMb: Long = 2L
-) {
-    val maxParseSizeBytes: Long get() = maxParseSizeMb * 1024 * 1024
-    val maxRegexSizeBytes: Long get() = maxRegexSizeMb * 1024 * 1024
-}
+    val maxRegexSizeMb: Long = 2L,
+    val maxDepth: Int = 1000,
+    val maxQueue: Int = 64,
+    val signatureMatchThreshold: Float = 0.7f,
+    val javaLevel: String = "JAVA_25"
+)
 
 enum class AnalysisMode {
     FULL,
     INCREMENTAL
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RepoPage(
     modifier: Modifier = Modifier,
@@ -102,9 +108,17 @@ fun RepoPage(
     }
 
     // ============ 配置状态 ============
-    var timeoutMsText by remember { mutableStateOf("5000") }
-    var maxParseSizeMbText by remember { mutableStateOf("5") }
-    var maxRegexSizeMbText by remember { mutableStateOf("2") }
+    // core
+    var maxDepth by remember { mutableStateOf(EngineConfigs.getMaxDepth()) }
+    var maxQueue by remember { mutableStateOf(EngineConfigs.getMaxQueue()) }
+    var signatureMatchThreshold by remember { mutableStateOf(EngineConfigs.getSignatureMatchThreshold()) }
+    // 分析器
+    var timeoutMsText by remember { mutableStateOf((ParserRegistry.getConfig(LanguageParser.CONFIG_KEY_TIMEOUT).value as Long).toString()) }
+    var maxParseSizeMbText by remember { mutableStateOf((ParserRegistry.getConfig(LanguageParser.CONFIG_KEY_MAX_PARSE_SIZE).value as Long).toString()) }
+    var maxRegexSizeMbText by remember { mutableStateOf((ParserRegistry.getConfig(LanguageParser.CONFIG_KEY_MAX_REGEX_SIZE).value as Long).toString()) }
+    // Java
+    var javaLevel by remember { mutableStateOf((ParserRegistry.getConfig(JavaParser.CONFIG_KEY_JAVA_LANGUAGE_LEVEL).value as Enum<*>).name) }
+
     var analysisMode by remember { mutableStateOf(AnalysisMode.FULL) }
 
     // ============ 分析状态 ============
@@ -130,7 +144,11 @@ fun RepoPage(
     fun buildSettings(): ParserSettings = ParserSettings(
         timeoutMs = timeoutMsText.toLongOrNull() ?: 5000L,
         maxParseSizeMb = maxParseSizeMbText.toLongOrNull() ?: 5L,
-        maxRegexSizeMb = maxRegexSizeMbText.toLongOrNull() ?: 2L
+        maxRegexSizeMb = maxRegexSizeMbText.toLongOrNull() ?: 2L,
+        maxDepth = maxDepth,
+        maxQueue = maxQueue,
+        signatureMatchThreshold = signatureMatchThreshold,
+        javaLevel = javaLevel
     )
 
     fun startAnalysis(mode: AnalysisMode = analysisMode) {
@@ -170,7 +188,11 @@ fun RepoPage(
         lastAnalyzedConfig = ""
     }
 
-    Column(modifier = modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp)
+    ) {
         // ============ 顶部：仓库选择（固定） ============
         RepoSelector(
             repoPaths = repoPaths,
@@ -208,15 +230,27 @@ fun RepoPage(
         CollapsibleConfigPanel(
             expanded = configExpanded,
             onToggle = { configExpanded = !configExpanded },
-            isAnalyzing = isAnalyzing,
             timeoutMsText = timeoutMsText,
             onTimeoutMsTextChange = { timeoutMsText = it },
             maxParseSizeMbText = maxParseSizeMbText,
             onMaxParseSizeMbTextChange = { maxParseSizeMbText = it },
             maxRegexSizeMbText = maxRegexSizeMbText,
             onMaxRegexSizeMbTextChange = { maxRegexSizeMbText = it },
+            maxDepth = maxDepth,
+            onMaxDepthChange = { maxDepth = it },
+            maxQueue = maxQueue,
+            onMaxQueueChange = { maxQueue = it },
+            signatureMatchThreshold = signatureMatchThreshold,
+            onSignatureMatchThresholdChange = { signatureMatchThreshold = it },
+            javaLevel = javaLevel,
+            onJavaLevelChange = { javaLevel = it },
             analysisMode = analysisMode,
-            onAnalysisModeChange = { analysisMode = it }
+            onAnalysisModeChange = { analysisMode = it },
+            selectedPath = selectedPath,
+            isAnalyzing = isAnalyzing,
+            configChanged = configChanged,
+            statistics = statistics,
+            onStartAnalysis = { startAnalysis() }
         )
 
         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
@@ -225,7 +259,11 @@ fun RepoPage(
         val currentErrorMessage = errorMessage
         val currentStatistics = statistics
 
-        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+        ) {
             when {
                 selectedPath == null -> {
                     Box(
@@ -269,30 +307,6 @@ fun RepoPage(
                         )
                     }
                 }
-            }
-        }
-
-        // ============ 底部：分析按钮（固定） ============
-        HorizontalDivider()
-        Spacer(modifier = Modifier.height(8.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-            horizontalArrangement = Arrangement.End
-        ) {
-            Button(
-                onClick = { startAnalysis() },
-                enabled = selectedPath != null && !isAnalyzing
-            ) {
-                val modeLabel = if (analysisMode == AnalysisMode.FULL)
-                    strings.repoAnalysisModeFull else strings.repoAnalysisModeIncremental
-                Text(
-                    text = when {
-                        isAnalyzing -> strings.repoAnalyzingButton
-                        configChanged -> strings.repoReanalyzeConfigChanged
-                        statistics != null -> "${strings.repoReanalyzePrefix}（${modeLabel}）"
-                        else -> strings.repoStartAnalysis
-                    }
-                )
             }
         }
     }
@@ -366,15 +380,27 @@ private fun RepoSelector(
 private fun CollapsibleConfigPanel(
     expanded: Boolean,
     onToggle: () -> Unit,
-    isAnalyzing: Boolean,
     timeoutMsText: String,
     onTimeoutMsTextChange: (String) -> Unit,
     maxParseSizeMbText: String,
     onMaxParseSizeMbTextChange: (String) -> Unit,
     maxRegexSizeMbText: String,
     onMaxRegexSizeMbTextChange: (String) -> Unit,
+    maxDepth: Int,
+    onMaxDepthChange: (Int) -> Unit,
+    maxQueue: Int,
+    onMaxQueueChange: (Int) -> Unit,
+    signatureMatchThreshold: Float,
+    onSignatureMatchThresholdChange: (Float) -> Unit,
+    javaLevel: String,
+    onJavaLevelChange: (String) -> Unit,
     analysisMode: AnalysisMode,
-    onAnalysisModeChange: (AnalysisMode) -> Unit
+    onAnalysisModeChange: (AnalysisMode) -> Unit,
+    selectedPath: String?,
+    isAnalyzing: Boolean,
+    configChanged: Boolean,
+    statistics: SimpleEntityChangeStatistics?,
+    onStartAnalysis: () -> Unit
 ) {
     val strings = LocalStrings.current
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -429,9 +455,40 @@ private fun CollapsibleConfigPanel(
                     onMaxParseSizeMbTextChange = onMaxParseSizeMbTextChange,
                     maxRegexSizeMbText = maxRegexSizeMbText,
                     onMaxRegexSizeMbTextChange = onMaxRegexSizeMbTextChange,
+                    maxDepth = maxDepth,
+                    onMaxDepthChange = onMaxDepthChange,
+                    maxQueue = maxQueue,
+                    onMaxQueueChange = onMaxQueueChange,
+                    signatureMatchThreshold = signatureMatchThreshold,
+                    onSignatureMatchThresholdChange = onSignatureMatchThresholdChange,
+                    javaLevel = javaLevel,
+                    onJavaLevelChange = onJavaLevelChange,
                     analysisMode = analysisMode,
                     onAnalysisModeChange = onAnalysisModeChange
                 )
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    Button(
+                        onClick = onStartAnalysis,
+                        enabled = selectedPath != null && !isAnalyzing
+                    ) {
+                        val modeLabel = if (analysisMode == AnalysisMode.FULL)
+                            strings.repoAnalysisModeFull else strings.repoAnalysisModeIncremental
+                        Text(
+                            text = when {
+                                isAnalyzing -> strings.repoAnalyzingButton
+                                configChanged -> strings.repoReanalyzeConfigChanged
+                                statistics != null -> "${strings.repoReanalyzePrefix}（${modeLabel}）"
+                                else -> strings.repoStartAnalysis
+                            }
+                        )
+                    }
+                }
             }
         }
     }
@@ -445,10 +502,22 @@ private fun ConfigContent(
     onMaxParseSizeMbTextChange: (String) -> Unit,
     maxRegexSizeMbText: String,
     onMaxRegexSizeMbTextChange: (String) -> Unit,
+    maxDepth: Int,
+    onMaxDepthChange: (Int) -> Unit,
+    maxQueue: Int,
+    onMaxQueueChange: (Int) -> Unit,
+    signatureMatchThreshold: Float,
+    onSignatureMatchThresholdChange: (Float) -> Unit,
+    javaLevel: String,
+    onJavaLevelChange: (String) -> Unit,
     analysisMode: AnalysisMode,
     onAnalysisModeChange: (AnalysisMode) -> Unit
 ) {
     val strings = LocalStrings.current
+    var maxDepthText by remember(maxDepth) { mutableStateOf(maxDepth.toString()) }
+    var maxQueueText by remember(maxQueue) { mutableStateOf(maxQueue.toString()) }
+    var thresholdText by remember(signatureMatchThreshold) { mutableStateOf(signatureMatchThreshold.toString()) }
+
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
@@ -514,27 +583,86 @@ private fun ConfigContent(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            NumberField(
-                value = timeoutMsText,
-                onValueChange = onTimeoutMsTextChange,
-                label = strings.repoFileTimeoutLabel
-            )
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                NumberField(
+                    value = timeoutMsText,
+                    onValueChange = onTimeoutMsTextChange,
+                    label = strings.repoFileTimeoutLabel,
+                    modifier = Modifier.weight(1f)
+                )
+                NumberField(
+                    value = maxParseSizeMbText,
+                    onValueChange = onMaxParseSizeMbTextChange,
+                    label = strings.repoMaxParseSizeLabel,
+                    modifier = Modifier.weight(1f)
+                )
+            }
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            NumberField(
-                value = maxParseSizeMbText,
-                onValueChange = onMaxParseSizeMbTextChange,
-                label = strings.repoMaxParseSizeLabel
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                NumberField(
+                    value = maxRegexSizeMbText,
+                    onValueChange = onMaxRegexSizeMbTextChange,
+                    label = strings.repoMaxRegexSizeLabel,
+                    modifier = Modifier.weight(1f)
+                )
+                OutlinedTextField(
+                    value = javaLevel,
+                    onValueChange = onJavaLevelChange,
+                    label = { Text("Java 语言级别") },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+            HorizontalDivider()
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Text(
+                text = "引擎配置",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onBackground
             )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                NumberField(
+                    value = maxDepthText,
+                    onValueChange = { newValue ->
+                        maxDepthText = newValue
+                        newValue.toIntOrNull()?.let { onMaxDepthChange(it) }
+                    },
+                    label = "最大遍历深度",
+                    modifier = Modifier.weight(1f)
+                )
+                NumberField(
+                    value = maxQueueText,
+                    onValueChange = { newValue ->
+                        maxQueueText = newValue
+                        newValue.toIntOrNull()?.let { onMaxQueueChange(it) }
+                    },
+                    label = "最大队列大小",
+                    modifier = Modifier.weight(1f)
+                )
+            }
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            NumberField(
-                value = maxRegexSizeMbText,
-                onValueChange = onMaxRegexSizeMbTextChange,
-                label = strings.repoMaxRegexSizeLabel
-            )
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                FloatField(
+                    value = thresholdText,
+                    onValueChange = { newValue ->
+                        thresholdText = newValue
+                        newValue.toFloatOrNull()?.let { onSignatureMatchThresholdChange(it) }
+                    },
+                    label = "签名匹配阈值",
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(modifier = Modifier.weight(1f))
+            }
         }
     }
 }
@@ -550,7 +678,7 @@ private fun AnalyzingView(
 
     LaunchedEffect(Unit) {
         while (true) {
-            delay(1000L)
+            delay(1000L.milliseconds)
             elapsedSeconds++
         }
     }
@@ -646,7 +774,8 @@ private fun AnalyzingView(
 private fun NumberField(
     value: String,
     onValueChange: (String) -> Unit,
-    label: String
+    label: String,
+    modifier: Modifier = Modifier
 ) {
     OutlinedTextField(
         value = value,
@@ -656,7 +785,29 @@ private fun NumberField(
             }
         },
         label = { Text(label) },
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
+        singleLine = true
+    )
+}
+
+// ==================== 浮点数输入框 ====================
+
+@Composable
+private fun FloatField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    modifier: Modifier = Modifier
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = { newValue ->
+            if (newValue.isEmpty() || newValue.matches(Regex("^\\d*\\.?\\d*$"))) {
+                onValueChange(newValue)
+            }
+        },
+        label = { Text(label) },
+        modifier = modifier.fillMaxWidth(),
         singleLine = true
     )
 }
@@ -716,7 +867,7 @@ private fun StatisticsContent(
         Spacer(modifier = Modifier.height(12.dp))
 
         AnimatedVisibility(
-            visible = operationOptionJson != null,
+            visible = true,
             enter = fadeIn(animationSpec = tween(400))
         ) {
             Row(
@@ -812,7 +963,7 @@ private suspend fun executeCoreAnalysis(
             val dbDir = "${System.getProperty("user.home", "")}/.semanticgit/db"
             val engine = AnalysisEngine()
             val dbName = Integer.toHexString(File(repoPath).absolutePath.hashCode())
-            val dbFile = java.io.File(dbDir, "$dbName.db")
+            val dbFile = File(dbDir, "$dbName.db")
 
             settings?.let { applyParserConfigs(it) }
 
@@ -820,20 +971,20 @@ private suspend fun executeCoreAnalysis(
                 AnalysisMode.FULL -> {
                     if (dbFile.exists()) dbFile.delete()
                     val future = engine.fullAnalysisAsync(
-                        repoPath, dbDir, dbName, onProgress, { e -> e.printStackTrace(); null }
-                    )
+                        repoPath, dbDir, dbName, onProgress
+                    ) { e -> e.printStackTrace(); null }
                     future.join()
                 }
                 AnalysisMode.INCREMENTAL -> {
                     if (dbFile.exists()) {
                         val future = engine.incrementalAnalysisAsync(
-                            repoPath, dbFile, onProgress, { e -> e.printStackTrace(); null }
-                        )
+                            repoPath, dbFile, onProgress
+                        ) { e -> e.printStackTrace(); null }
                         future.join()
                     } else {
                         val future = engine.fullAnalysisAsync(
-                            repoPath, dbDir, dbName, onProgress, { e -> e.printStackTrace(); null }
-                        )
+                            repoPath, dbDir, dbName, onProgress
+                        ) { e -> e.printStackTrace(); null }
                         future.join()
                     }
                 }
@@ -869,7 +1020,13 @@ private fun applyParserConfigs(settings: ParserSettings) {
             LanguageParser.CONFIG_KEY_MAX_REGEX_SIZE,
             ConfigItems.LONG(settings.maxRegexSizeMb * 1024L * 1024L).build()
         )
-        println("[Config Applied] timeout=${settings.timeoutMs}ms, maxParse=${settings.maxParseSizeMb}MB, maxRegex=${settings.maxRegexSizeMb}MB")
+        EngineConfigs.setMaxDepth(settings.maxDepth)
+        EngineConfigs.setMaxQueue(settings.maxQueue)
+        EngineConfigs.setSignatureMatchThreshold(settings.signatureMatchThreshold)
+        logger.info {
+            "[Config Applied] timeout=${settings.timeoutMs}ms, maxParse=${settings.maxParseSizeMb}MB, maxRegex=${settings.maxRegexSizeMb}MB, " +
+                    "maxDepth=${settings.maxDepth}, maxQueue=${settings.maxQueue}, threshold=${settings.signatureMatchThreshold}, javaLevel=${settings.javaLevel}"
+        }
     } catch (e: Exception) {
         System.err.println("[Warning] Failed to apply parser configs: ${e.message}")
     }
