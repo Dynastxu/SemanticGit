@@ -1,4 +1,4 @@
-package com.github.semanticgit.ui
+package com.github.semanticgit.ui.utils
 
 import java.io.File
 

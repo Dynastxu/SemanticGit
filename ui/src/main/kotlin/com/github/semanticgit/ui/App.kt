@@ -31,7 +31,6 @@ import cafe.adriel.lyricist.ProvideStrings
 import cafe.adriel.lyricist.rememberStrings
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowScope
@@ -43,6 +42,7 @@ import com.github.semanticgit.ui.page.EntityAnalysis
 import com.github.semanticgit.ui.page.RepoPage
 import com.github.semanticgit.ui.page.Setting
 import com.github.semanticgit.ui.page.Submit
+import com.github.semanticgit.ui.utils.JsonFileUtil
 import java.io.File
 
 fun main() = application {

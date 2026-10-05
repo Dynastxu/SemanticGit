@@ -20,7 +20,7 @@ import com.github.semanticgit.core.dto.EntityChangeHistory
 import com.github.semanticgit.core.dto.HistoryEdge
 import com.github.semanticgit.core.dto.HistoryNode
 import com.github.semanticgit.ui.config.DbConfig
-import com.github.semanticgit.ui.JsonFileUtil
+import com.github.semanticgit.ui.utils.JsonFileUtil
 import com.github.semanticgit.ui.LocalStrings
 import com.github.semanticgit.ui.view.chart.GitGraphView
 import kotlinx.coroutines.Dispatchers
