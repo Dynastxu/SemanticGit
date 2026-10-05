@@ -96,90 +96,57 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
                         chronological.size(), maxDepth);
             }
 
-            String firstHash = chronological.getFirst().getHash();
-            String lastHash = chronological.getLast().getHash();
-
             Map<String, CommitMeta> commitMetaMap = commits.stream()
                     .collect(Collectors.toMap(CommitMeta::getHash, c -> c));
 
             ChangeLogDao changeLogDao = new ChangeLogDaoImpl(dbManager);
 
-            if (firstHash.equals(lastHash)) {
-                GitCommitInfo info = gitService.getCommitInfo(firstHash);
-                CommitMeta commitMeta = commitMetaMap.get(info.getCommitHash());
-                if (commitMeta != null) {
-                    List<ChangeLog> changeLogs = analyzeDiff(info.getDiffEntries(), commitMeta);
-                    changeLogDao.saveAll(changeLogs);
-                    log.info("Analyzed commit 1/1: {} changes", changeLogs.size());
-                }
-                if (onProgress != null) {
-                    onProgress.accept(1.0f);
-                }
-            } else {
-                int totalCommits = gitService.countCommitsBetween(firstHash, lastHash) + 1;
-                AtomicInteger processed = new AtomicInteger(0);
-                AtomicInteger inProgress = new AtomicInteger(0);
+            int totalCommits = chronological.size();
+            AtomicInteger processed = new AtomicInteger(0);
+            AtomicInteger inProgress = new AtomicInteger(0);
 
-                int parallelism = Math.clamp(totalCommits, 1, Runtime.getRuntime().availableProcessors());
-                List<CompletableFuture<Void>> futures = new ArrayList<>();
-                try (ExecutorService executor = new ThreadPoolExecutor(
-                        parallelism, parallelism,
-                        0L, TimeUnit.MILLISECONDS,
-                        new LinkedBlockingQueue<>(EngineConfigs.getMaxQueue()),
-                        new ThreadPoolExecutor.CallerRunsPolicy())) {
+            int parallelism = Math.clamp(totalCommits, 1, Runtime.getRuntime().availableProcessors());
+            List<CompletableFuture<Void>> futures = new ArrayList<>();
+            try (ExecutorService executor = new ThreadPoolExecutor(
+                    parallelism, parallelism,
+                    0L, TimeUnit.MILLISECONDS,
+                    new LinkedBlockingQueue<>(EngineConfigs.getMaxQueue()),
+                    new ThreadPoolExecutor.CallerRunsPolicy())) {
 
-                    futures.add(CompletableFuture.runAsync(() -> {
+                for (CommitMeta cm : chronological) {
+                    CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
+                        inProgress.incrementAndGet();
+                        log.info("In progress: {}", inProgress.get());
                         try {
-                            GitCommitInfo firstInfo = gitService.getCommitInfo(firstHash);
-                            CommitMeta firstMeta = commitMetaMap.get(firstInfo.getCommitHash());
-                            if (firstMeta != null) {
-                                List<ChangeLog> changeLogs = analyzeDiff(firstInfo.getDiffEntries(), firstMeta);
-                                synchronized (changeLogDao) {
-                                    changeLogDao.saveAll(changeLogs);
-                                }
-                                int cur = processed.incrementAndGet();
-                                if (onProgress != null) {
-                                    onProgress.accept((float) cur / totalCommits);
-                                }
-                                log.info("Analyzed commit {}/{}: {} changes", cur, totalCommits, changeLogs.size());
+                            GitCommitInfo info = gitService.getCommitInfo(cm.getHash());
+                            CommitMeta meta = commitMetaMap.get(info.getCommitHash());
+                            if (meta == null) {
+                                log.warn("Commit {} not found in commit meta map",
+                                        info.getCommitHash().substring(0, Math.min(7, info.getCommitHash().length())));
+                                return;
                             }
+
+                            List<ChangeLog> changeLogs = analyzeDiff(info.getDiffEntries(), meta);
+
+                            synchronized (changeLogDao) {
+                                changeLogDao.saveAll(changeLogs);
+                            }
+
+                            int cur = processed.incrementAndGet();
+                            if (onProgress != null) {
+                                onProgress.accept((float) cur / totalCommits);
+                            }
+                            log.info("Analyzed commit {}/{}: {} changes", cur, totalCommits, changeLogs.size());
                         } catch (java.io.IOException e) {
-                            log.error("Failed to get commit info for firstHash {}", firstHash, e);
+                            log.error("Failed to get commit info for {}", cm.getHash(), e);
+                        } finally {
+                            inProgress.decrementAndGet();
                         }
-                    }, executor));
-
-                    gitService.forEachCommitBetween(firstHash, lastHash, info -> {
-                        CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
-                            inProgress.incrementAndGet();
-                            log.info("In progress: {}", inProgress.get());
-                            try {
-                                CommitMeta commitMeta = commitMetaMap.get(info.getCommitHash());
-                                if (commitMeta == null) {
-                                    log.warn("Commit {} not found in commit meta map",
-                                            info.getCommitHash().substring(0, Math.min(7, info.getCommitHash().length())));
-                                    return;
-                                }
-
-                                List<ChangeLog> changeLogs = analyzeDiff(info.getDiffEntries(), commitMeta);
-
-                                synchronized (changeLogDao) {
-                                    changeLogDao.saveAll(changeLogs);
-                                }
-
-                                int cur = processed.incrementAndGet();
-                                if (onProgress != null) {
-                                    onProgress.accept((float) cur / totalCommits);
-                                }
-                                log.info("Analyzed commit {}/{}: {} changes", cur, totalCommits, changeLogs.size());
-                            } finally {
-                                inProgress.decrementAndGet();
-                            }
-                        }, executor);
-                        futures.add(future);
-                    });
-
-                    CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+                    }, executor);
+                    futures.add(future);
                 }
+
+                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
             }
         } catch (java.io.IOException e) {
             throw new GitOperationException("Git operation failed during full analysis", e);
