@@ -82,6 +82,14 @@ fun PieChartDemo() {
                             lastClick = "玫瑰图(radius) → $name：$value"
                         }
                     )
+                    DemoChartType.Sunburst -> SunburstChart(
+                        data = sunburstDemoData,
+                        title = "项目技术栈分布",
+                        modifier = Modifier.fillMaxSize(),
+                        onChartClick = { _, name, value ->
+                            lastClick = "旭日图 → $name：$value"
+                        }
+                    )
                 }
             }
         }
@@ -91,7 +99,8 @@ fun PieChartDemo() {
 private enum class DemoChartType(val label: String) {
     Pie("饼图"),
     RoseArea("玫瑰图(area)"),
-    RoseRadius("玫瑰图(radius)")
+    RoseRadius("玫瑰图(radius)"),
+    Sunburst("旭日图")
 }
 
 private val pieDemoData = listOf(
@@ -112,4 +121,30 @@ private val roseDemoData = listOf(
     PieDataItem("运动户外", 680.0),
     PieDataItem("美妆个护", 540.0),
     PieDataItem("母婴用品", 310.0)
+)
+
+private val sunburstDemoData = SunburstDataItem(
+    name = "项目总览",
+    children = listOf(
+        SunburstDataItem(name = "前端", children = listOf(
+            SunburstDataItem(name = "React", value = 120.0),
+            SunburstDataItem(name = "Vue", value = 80.0),
+            SunburstDataItem(name = "Angular", value = 45.0)
+        )),
+        SunburstDataItem(name = "后端", children = listOf(
+            SunburstDataItem(name = "Kotlin", value = 200.0),
+            SunburstDataItem(name = "Java", value = 150.0),
+            SunburstDataItem(name = "Python", value = 130.0),
+            SunburstDataItem(name = "Go", value = 70.0)
+        )),
+        SunburstDataItem(name = "数据库", children = listOf(
+            SunburstDataItem(name = "PostgreSQL", value = 90.0),
+            SunburstDataItem(name = "MySQL", value = 75.0),
+            SunburstDataItem(name = "MongoDB", value = 50.0)
+        )),
+        SunburstDataItem(name = "运维", children = listOf(
+            SunburstDataItem(name = "Docker", value = 60.0),
+            SunburstDataItem(name = "K8s", value = 40.0)
+        ))
+    )
 )
