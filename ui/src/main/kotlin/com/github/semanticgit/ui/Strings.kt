@@ -96,6 +96,7 @@ data class Strings(
     val noAuthorsFound: String,
     val totalAuthors: String,
     val loadingAuthors: String,
+    val authorCommitProportion: String,
     // Settings
     val settingsTitle: String,
     val settingsLanguage: String,
@@ -223,6 +224,7 @@ val ZhStrings = Strings(
     noAuthorsFound = "未找到作者信息",
     totalAuthors = "作者总数",
     loadingAuthors = "加载中...",
+    authorCommitProportion = "作者提交数量占比",
     // Settings
     settingsTitle = "设置",
     settingsLanguage = "语言",
@@ -349,6 +351,7 @@ val EnStrings = Strings(
     noAuthorsFound = "No authors found",
     totalAuthors = "Total Authors",
     loadingAuthors = "Loading...",
+    authorCommitProportion = "Author Commit Proportion",
     // Settings
     settingsTitle = "Settings",
     settingsLanguage = "Language",

@@ -26,6 +26,9 @@ import com.github.semanticgit.core.db.DatabaseManager
 import com.github.semanticgit.core.dto.AuthorChangeStatistics
 import com.github.semanticgit.ui.config.DbConfig
 import com.github.semanticgit.ui.LocalStrings
+import com.github.semanticgit.ui.view.chart.DropdownCorner
+import com.github.semanticgit.ui.view.chart.MultiChartDisplay
+import com.github.semanticgit.ui.view.chart.PieDataItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -48,6 +51,7 @@ fun AutoPortrait(
     var isLoading by remember { mutableStateOf(false) }
     var allAuthors by remember { mutableStateOf<List<Author>>(emptyList()) }
     var authorStatsMap by remember { mutableStateOf<Map<Long, AuthorChangeStatistics>>(emptyMap()) }
+    var authorCommitCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(selectedPath) {
@@ -56,9 +60,10 @@ fun AutoPortrait(
                 loadAuthorData(
                     repoPath = selectedPath,
                     onLoading = { isLoading = it },
-                    onSuccess = { authors, statsMap ->
+                    onSuccess = { authors, statsMap, commitCounts ->
                         allAuthors = authors
                         authorStatsMap = statsMap
+                        authorCommitCounts = commitCounts
                         errorMessage = null
                     },
                     onError = {
@@ -71,6 +76,7 @@ fun AutoPortrait(
         } else {
             allAuthors = emptyList()
             authorStatsMap = emptyMap()
+            authorCommitCounts = emptyMap()
             searchQuery = ""
         }
     }
@@ -236,9 +242,10 @@ fun AutoPortrait(
                         loadAuthorData(
                             repoPath = selectedPath,
                             onLoading = { isLoading = it },
-                            onSuccess = { authors, statsMap ->
+                            onSuccess = { authors, statsMap, commitCounts ->
                                 allAuthors = authors
                                 authorStatsMap = statsMap
+                                authorCommitCounts = commitCounts
                                 errorMessage = null
                             },
                             onError = {
@@ -255,6 +262,19 @@ fun AutoPortrait(
                     contentDescription = strings.reset,
                     modifier = Modifier.size(18.dp)
                 )
+            }
+        }
+
+        val authorCommitData = remember(allAuthors, authorCommitCounts) {
+            if (authorCommitCounts.isNotEmpty()) {
+                allAuthors.map { author ->
+                    val key = "${author.name}|${author.email}"
+                    val count = authorCommitCounts[key] ?: 0
+                    PieDataItem(name = author.name, value = count.toDouble())
+                }.filter { it.value > 0.0 }
+                    .sortedByDescending { it.value }
+            } else {
+                emptyList()
             }
         }
 
@@ -289,25 +309,6 @@ fun AutoPortrait(
                 }
             }
         } else if (allAuthors.isNotEmpty()) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "${strings.totalAuthors}: ${allAuthors.size}",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.secondary
-                )
-                if (searchQuery.isNotBlank()) {
-                    Text(
-                        text = strings.authorMatchedCount.replace("{0}", filteredAuthors.size.toString()),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
             if (filteredAuthors.isEmpty()) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
@@ -330,8 +331,49 @@ fun AutoPortrait(
                 }
             } else {
                 LazyColumn(
+                    modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    if (authorCommitData.isNotEmpty()) {
+                        item(key = "chart") {
+                            Card(
+                                modifier = Modifier.fillMaxWidth().height(350.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surface
+                                ),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                            ) {
+                                MultiChartDisplay(
+                                    data = authorCommitData,
+                                    title = strings.authorCommitProportion,
+                                    dropdownCorner = DropdownCorner.TopRight,
+                                    modifier = Modifier.fillMaxSize().padding(12.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    item(key = "header") {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "${strings.totalAuthors}: ${allAuthors.size}",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+                            if (searchQuery.isNotBlank()) {
+                                Text(
+                                    text = strings.authorMatchedCount.replace("{0}", filteredAuthors.size.toString()),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+
                     items(filteredAuthors, key = { it.id }) { author ->
                         val stats = authorStatsMap[author.id]
                         AuthorCard(
@@ -341,7 +383,7 @@ fun AutoPortrait(
                     }
                 }
             }
-        } else if (!isLoading) {
+        } else {
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
@@ -627,7 +669,7 @@ private fun NatureDistribution(nfMap: Map<ChangeNatureFlag, Float>) {
 private suspend fun loadAuthorData(
     repoPath: String,
     onLoading: (Boolean) -> Unit,
-    onSuccess: (List<Author>, Map<Long, AuthorChangeStatistics>) -> Unit,
+    onSuccess: (List<Author>, Map<Long, AuthorChangeStatistics>, Map<String, Int>) -> Unit,
     onError: (String) -> Unit
 ) = withContext(Dispatchers.IO) {
     try {
@@ -649,7 +691,10 @@ private suspend fun loadAuthorData(
                 } catch (_: Exception) {
                 }
             }
-            onSuccess(authors, statsMap)
+            val commitCounts = provider.getCommits()
+                .groupBy { "${it.author.name}|${it.author.email}" }
+                .mapValues { it.value.size }
+            onSuccess(authors, statsMap, commitCounts)
         }
     } catch (e: Exception) {
         onError("Failed to load author data: ${e.message}")
