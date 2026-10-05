@@ -117,7 +117,14 @@ data class Strings(
     val selectDbFile: String,
     val loadFromDb: String,
     val dbFileLoaded: String,
-    val failedToLoadDb: String
+    val failedToLoadDb: String,
+    // DB Storage Settings
+    val settingsDbStorage: String,
+    val settingsDbStoragePath: String,
+    val settingsDbStorageBrowse: String,
+    val settingsDbFilenameFormat: String,
+    val settingsDbFilenameFormatHint: String,
+    val settingsDbResetDefault: String
 )
 
 val ZhStrings = Strings(
@@ -235,7 +242,13 @@ val ZhStrings = Strings(
     selectDbFile = "选择数据库文件",
     loadFromDb = "从数据库加载",
     dbFileLoaded = "数据库文件已加载",
-    failedToLoadDb = "加载数据库文件失败"
+    failedToLoadDb = "加载数据库文件失败",
+    settingsDbStorage = "数据库存储",
+    settingsDbStoragePath = "存储路径",
+    settingsDbStorageBrowse = "浏览...",
+    settingsDbFilenameFormat = "文件名格式",
+    settingsDbFilenameFormatHint = $$"可用变量：${name}（仓库名）、${hash}（路径哈希）、${time}（时间戳）",
+    settingsDbResetDefault = "恢复默认"
 )
 
 val EnStrings = Strings(
@@ -353,7 +366,13 @@ val EnStrings = Strings(
     selectDbFile = "Select Database File",
     loadFromDb = "Load from DB",
     dbFileLoaded = "Database file loaded",
-    failedToLoadDb = "Failed to load database file"
+    failedToLoadDb = "Failed to load database file",
+    settingsDbStorage = "Database Storage",
+    settingsDbStoragePath = "Storage Path",
+    settingsDbStorageBrowse = "Browse...",
+    settingsDbFilenameFormat = "Filename Format",
+    settingsDbFilenameFormatHint = $$"Available placeholders: ${name} (repo name), ${time} (timestamp)",
+    settingsDbResetDefault = "Reset Default"
 )
 
 val LocalStrings = staticCompositionLocalOf { ZhStrings }

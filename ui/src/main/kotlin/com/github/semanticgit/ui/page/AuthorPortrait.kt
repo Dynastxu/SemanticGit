@@ -24,6 +24,7 @@ import com.github.semanticgit.common.entity.ChangeOperation
 import com.github.semanticgit.core.StatisticsProvider
 import com.github.semanticgit.core.db.DatabaseManager
 import com.github.semanticgit.core.dto.AuthorChangeStatistics
+import com.github.semanticgit.ui.config.DbConfig
 import com.github.semanticgit.ui.LocalStrings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -631,8 +632,9 @@ private suspend fun loadAuthorData(
 ) = withContext(Dispatchers.IO) {
     try {
         onLoading(true)
-        val dbDir = "${System.getProperty("user.home", "")}/.semanticgit/db"
-        val dbName = Integer.toHexString(File(repoPath).absolutePath.hashCode())
+        val dbFile = DbConfig.findLatestDbFile(repoPath) ?: return@withContext onError("No database found")
+        val dbDir = dbFile.parentFile?.absolutePath ?: return@withContext onError("Invalid database directory")
+        val dbName = dbFile.nameWithoutExtension
 
         DatabaseManager(dbDir, dbName, false).use { dbManager ->
             val provider = StatisticsProvider(dbManager)

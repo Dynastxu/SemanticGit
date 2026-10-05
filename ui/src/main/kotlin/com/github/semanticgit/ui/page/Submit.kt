@@ -50,6 +50,7 @@ import com.github.semanticgit.common.entity.CommitMeta
 import com.github.semanticgit.core.StatisticsProvider
 import com.github.semanticgit.core.dto.CommitEntityChangeStatistics
 import com.github.semanticgit.core.db.DatabaseManager
+import com.github.semanticgit.ui.config.DbConfig
 import com.github.semanticgit.ui.view.CommitNode
 import com.github.semanticgit.ui.view.CommitTopologyGraph
 import com.github.semanticgit.ui.LocalStrings
@@ -93,8 +94,9 @@ fun Submit(
             errorMessage = null
             try {
                 withContext(Dispatchers.IO) {
-                    val dbDir = "${System.getProperty("user.home", "")}/.semanticgit/db"
-                    val dbName = Integer.toHexString(java.io.File(path).absolutePath.hashCode())
+                    val dbFile = DbConfig.findLatestDbFile(path) ?: throw IllegalStateException("No database found for repository")
+                    val dbDir = dbFile.parentFile?.absolutePath ?: throw IllegalStateException("Invalid database directory")
+                    val dbName = dbFile.nameWithoutExtension
                     DatabaseManager(dbDir, dbName, false).use { dbManager ->
                         val provider = StatisticsProvider(dbManager)
                         val commits = provider.getCommits()
@@ -149,8 +151,9 @@ fun Submit(
             isLoadingStats = true
             try {
                 val stats = withContext(Dispatchers.IO) {
-                    val dbDir = "${System.getProperty("user.home", "")}/.semanticgit/db"
-                    val dbName = Integer.toHexString(java.io.File(selectedPath!!).absolutePath.hashCode())
+                    val dbFile = DbConfig.findLatestDbFile(selectedPath!!) ?: return@withContext null
+                    val dbDir = dbFile.parentFile?.absolutePath ?: return@withContext null
+                    val dbName = dbFile.nameWithoutExtension
                     DatabaseManager(dbDir, dbName, false).use { dbManager ->
                         val provider = StatisticsProvider(dbManager)
                         val result = provider.getCommitEntityChangeStatistics(hash)

@@ -63,6 +63,7 @@ import com.github.semanticgit.core.dto.SimpleEntityChangeStatistics
 import com.github.semanticgit.core.parser.ParserRegistry
 import com.github.semanticgit.parser.java.JavaParser
 import com.github.semanticgit.parser.java.api.LanguageParser
+import com.github.semanticgit.ui.config.DbConfig
 import com.github.semanticgit.ui.LocalStrings
 import com.github.semanticgit.ui.LocalThemeMode
 import com.github.semanticgit.ui.ThemeMode
@@ -191,10 +192,9 @@ fun RepoPage(
 
     fun loadExistingStatistics(repoPath: String) {
         scope.launch {
-            val dbDir = "${System.getProperty("user.home", "")}/.semanticgit/db"
-            val dbName = Integer.toHexString(File(repoPath).absolutePath.hashCode())
-            val dbFile = File(dbDir, "$dbName.db")
-            if (!dbFile.exists()) return@launch
+            val dbFile = DbConfig.findLatestDbFile(repoPath) ?: return@launch
+            val dbDir = dbFile.parentFile?.absolutePath ?: return@launch
+            val dbName = dbFile.nameWithoutExtension
             try {
                 DatabaseManager(dbDir, dbName, false).use { dbManager ->
                     val provider = StatisticsProvider(dbManager)
@@ -986,9 +986,9 @@ private suspend fun executeCoreAnalysis(
 ): AnalysisResult {
     return withContext(Dispatchers.IO) {
         try {
-            val dbDir = "${System.getProperty("user.home", "")}/.semanticgit/db"
+            val dbDir = DbConfig.resolveDbDir()
             val engine = AnalysisEngine()
-            val dbName = Integer.toHexString(File(repoPath).absolutePath.hashCode())
+            val dbName = DbConfig.resolveDbName(repoPath)
             val dbFile = File(dbDir, "$dbName.db")
 
             settings?.let { applyParserConfigs(it) }
@@ -1002,9 +1002,10 @@ private suspend fun executeCoreAnalysis(
                     future.join()
                 }
                 AnalysisMode.INCREMENTAL -> {
-                    if (dbFile.exists()) {
+                    val latestDb = DbConfig.findLatestDbFile(repoPath)
+                    if (latestDb != null && latestDb.exists()) {
                         val future = engine.incrementalAnalysisAsync(
-                            repoPath, dbFile, onProgress
+                            repoPath, latestDb, onProgress
                         ) { e -> logger.error(e) { "incrementalAnalysis failed" }; null }
                         future.join()
                     } else {

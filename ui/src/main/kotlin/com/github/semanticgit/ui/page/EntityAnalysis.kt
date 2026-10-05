@@ -20,6 +20,7 @@ import com.github.semanticgit.core.db.DatabaseManager
 import com.github.semanticgit.core.dto.EntityChangeHistory
 import com.github.semanticgit.core.dto.HistoryEdge
 import com.github.semanticgit.core.dto.HistoryNode
+import com.github.semanticgit.ui.config.DbConfig
 import com.github.semanticgit.ui.LocalStrings
 import com.github.semanticgit.ui.view.chart.Dag
 import com.github.semanticgit.ui.view.chart.DagListView
@@ -692,8 +693,11 @@ private suspend fun queryEntityChangeHistory(
     try {
         onLoading(true)
 
-        val dbDir = "${System.getProperty("user.home")}/.semanticgit/db"
-        val dbName = Integer.toHexString(File(repoPath).absolutePath.hashCode())
+        val dbFile = DbConfig.findLatestDbFile(repoPath)
+            ?: return@withContext onError("No database found for repository")
+        val dbDir = dbFile.parentFile?.absolutePath
+            ?: return@withContext onError("Invalid database directory")
+        val dbName = dbFile.nameWithoutExtension
 
         DatabaseManager(dbDir, dbName, false).use { dbManager ->
             val provider = StatisticsProvider(dbManager)
@@ -715,8 +719,9 @@ private suspend fun queryEntityChangeHistory(
  */
 private suspend fun searchAllEntities(repoPath: String): List<String> = withContext(Dispatchers.IO) {
     try {
-        val dbDir = "${System.getProperty("user.home")}/.semanticgit/db"
-        val dbName = Integer.toHexString(File(repoPath).absolutePath.hashCode())
+        val dbFile = DbConfig.findLatestDbFile(repoPath) ?: return@withContext emptyList()
+        val dbDir = dbFile.parentFile?.absolutePath ?: return@withContext emptyList()
+        val dbName = dbFile.nameWithoutExtension
 
         DatabaseManager(dbDir, dbName, false).use { dbManager ->
             val provider = StatisticsProvider(dbManager)
