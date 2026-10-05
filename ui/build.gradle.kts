@@ -1,5 +1,3 @@
-import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
-
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.compose)
@@ -49,7 +47,7 @@ tasks.register<JavaExec>("runEChartsDemo") {
     group = "demo"
     description = "Run ECharts Demo"
     classpath = sourceSets["test"].runtimeClasspath
-    mainClass.set("com.github.semanticgit.ui.view.EChartsViewDemoKt")
+    mainClass.set("com.github.semanticgit.ui.view.chart.EChartsViewDemoKt")
     jvmArgs = commonJvmArgs
 }
 
@@ -57,6 +55,30 @@ tasks.register<JavaExec>("runDagListDemo") {
     group = "demo"
     description = "Run DAG List Demo"
     classpath = sourceSets["test"].runtimeClasspath
-    mainClass.set("com.github.semanticgit.ui.view.DagListViewDemoKt")
+    mainClass.set("com.github.semanticgit.ui.view.chart.DagListViewDemoKt")
+    jvmArgs = commonJvmArgs
+}
+
+tasks.register<JavaExec>("runPieChartDemo") {
+    group = "demo"
+    description = "Run Pie Chart Demo"
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("com.github.semanticgit.ui.view.chart.PieChartDemoKt")
+    jvmArgs = commonJvmArgs
+}
+
+tasks.register<JavaExec>("runBarChartDemo") {
+    group = "demo"
+    description = "Run Bar Chart Demo"
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("com.github.semanticgit.ui.view.chart.BarChartDemoKt")
+    jvmArgs = commonJvmArgs
+}
+
+tasks.register<JavaExec>("runMultiChartDisplayDemo") {
+    group = "demo"
+    description = "Run Multi Chart Display Demo"
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("com.github.semanticgit.ui.view.chart.MultiChartDisplayDemoKt")
     jvmArgs = commonJvmArgs
 }

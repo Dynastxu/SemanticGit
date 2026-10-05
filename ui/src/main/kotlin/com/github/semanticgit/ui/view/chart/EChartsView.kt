@@ -1,6 +1,6 @@
 @file:Suppress("removal", "DEPRECATION")
 
-package com.github.semanticgit.ui.view
+package com.github.semanticgit.ui.view.chart
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -154,7 +154,7 @@ fun EChartsView(
 
     DisposableEffect(Unit) {
         onDispose {
-            println("🧹 EChartsView 开始清理")
+            logger.debug("EChartsView dispose")
             val webView = webViewRef.value
             webViewRef.value = null
             pageReady.value = false

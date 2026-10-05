@@ -1,4 +1,4 @@
-package com.github.semanticgit.ui.view
+package com.github.semanticgit.ui.view.chart
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
@@ -23,7 +23,7 @@ fun main() = application {
 @Composable
 fun EChartsViewDemo() {
     MaterialTheme {
-        var chartType by remember { mutableStateOf(ChartType.Bar) }
+        var chartType by remember { mutableStateOf(EChartsDemoChartType.Bar) }
         var lastClick by remember { mutableStateOf("点击图表元素查看交互效果…") }
 
         Column(
@@ -35,7 +35,7 @@ fun EChartsViewDemo() {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text("图表类型：", style = MaterialTheme.typography.titleMedium)
-                ChartType.entries.forEach { type ->
+                EChartsDemoChartType.entries.forEach { type ->
                     FilterChip(
                         selected = chartType == type,
                         onClick = { chartType = type },
@@ -67,7 +67,7 @@ fun EChartsViewDemo() {
     }
 }
 
-enum class ChartType(val label: String, val option: String) {
+enum class EChartsDemoChartType(val label: String, val option: String) {
     Bar(
         "柱状图",
         """

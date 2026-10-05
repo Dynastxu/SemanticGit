@@ -21,9 +21,9 @@ import com.github.semanticgit.core.dto.EntityChangeHistory
 import com.github.semanticgit.core.dto.HistoryEdge
 import com.github.semanticgit.core.dto.HistoryNode
 import com.github.semanticgit.ui.LocalStrings
-import com.github.semanticgit.ui.view.Dag
-import com.github.semanticgit.ui.view.DagListView
-import com.github.semanticgit.ui.view.DagNode
+import com.github.semanticgit.ui.view.chart.Dag
+import com.github.semanticgit.ui.view.chart.DagListView
+import com.github.semanticgit.ui.view.chart.DagNode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext

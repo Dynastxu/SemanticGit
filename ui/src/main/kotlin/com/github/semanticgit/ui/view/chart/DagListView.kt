@@ -1,4 +1,4 @@
-package com.github.semanticgit.ui.view
+package com.github.semanticgit.ui.view.chart
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background

@@ -66,7 +66,7 @@ import com.github.semanticgit.parser.java.api.LanguageParser
 import com.github.semanticgit.ui.LocalStrings
 import com.github.semanticgit.ui.LocalThemeMode
 import com.github.semanticgit.ui.ThemeMode
-import com.github.semanticgit.ui.view.EChartsView
+import com.github.semanticgit.ui.view.chart.EChartsView
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
