@@ -91,20 +91,22 @@ private fun WindowScope.SemanticGitApp(
     var selectedIndex by remember { mutableStateOf(0) }
     val strings = LocalStrings.current
 
-    val repoHistoryFile = remember { File(System.getProperty("user.home"), ".semanticgit/repos.txt") }
+    val repoHistoryFile = remember { File(System.getProperty("user.home"), ".semanticgit/repos.json") }
+    val legacyRepoTxtFile = remember { File(System.getProperty("user.home"), ".semanticgit/repos.txt") }
 
-    val lastRepoIndexFile = remember { File(System.getProperty("user.home"), ".semanticgit/last_repo.txt") }
+    val configFile = remember { File(System.getProperty("user.home"), ".semanticgit/config.json") }
+    val legacyLastRepoIndexFile = remember { File(System.getProperty("user.home"), ".semanticgit/last_repo.txt") }
 
     val repoPaths = remember {
         mutableStateListOf<String>().also { list ->
-            loadRepoPaths(repoHistoryFile).forEach { path ->
+            loadRepoPaths(repoHistoryFile, legacyRepoTxtFile).forEach { path ->
                 list.add(path)
             }
         }
     }
 
     var selectedRepoIndex by remember {
-        val savedIndex = loadLastRepoIndex(lastRepoIndexFile)
+        val savedIndex = loadLastRepoIndex(configFile, legacyLastRepoIndexFile)
         mutableStateOf(
             when {
                 repoPaths.isNotEmpty() && savedIndex in repoPaths.indices -> savedIndex
@@ -119,7 +121,7 @@ private fun WindowScope.SemanticGitApp(
     }
 
     LaunchedEffect(selectedRepoIndex) {
-        saveLastRepoIndex(lastRepoIndexFile, selectedRepoIndex)
+        saveLastRepoIndex(configFile, selectedRepoIndex)
     }
 
     val navItems = listOf(
@@ -226,41 +228,53 @@ private fun WindowScope.SemanticGitApp(
     }
 }
 
-private fun loadRepoPaths(file: File): List<String> {
-    if (!file.exists()) return emptyList()
-    return try {
-        file.readLines()
-            .map { it.trim() }
-            .filter { it.isNotEmpty() && File(it).exists() && File(it).isDirectory }
-    } catch (e: Exception) {
-        e.printStackTrace()
-        emptyList()
+private fun loadRepoPaths(jsonFile: File, legacyTxtFile: File): List<String> {
+    if (jsonFile.exists()) {
+        val paths = JsonFileUtil.readStringArray(jsonFile)
+        return paths.filter { it.isNotEmpty() && File(it).exists() && File(it).isDirectory }
     }
+    if (legacyTxtFile.exists()) {
+        return try {
+            val paths = legacyTxtFile.readLines()
+                .map { it.trim() }
+                .filter { it.isNotEmpty() && File(it).exists() && File(it).isDirectory }
+            JsonFileUtil.writeStringArray(jsonFile, paths)
+            legacyTxtFile.delete()
+            paths
+        } catch (e: Exception) {
+            e.printStackTrace()
+            emptyList()
+        }
+    }
+    return emptyList()
 }
 
 private fun saveRepoPaths(file: File, paths: List<String>) {
-    try {
-        file.parentFile?.mkdirs()
-        file.writeText(paths.joinToString("\n"))
-    } catch (e: Exception) {
-        e.printStackTrace()
-    }
+    JsonFileUtil.writeStringArray(file, paths)
 }
 
-private fun loadLastRepoIndex(file: File): Int {
-    if (!file.exists()) return -1
-    return try {
-        file.readText().trim().toIntOrNull() ?: -1
-    } catch (e: Exception) {
-        -1
+private fun loadLastRepoIndex(configFile: File, legacyTxtFile: File): Int {
+    if (configFile.exists()) {
+        val config = JsonFileUtil.readConfig(configFile)
+        return JsonFileUtil.getConfigInt(config, "lastRepoIndex", -1)
     }
+    if (legacyTxtFile.exists()) {
+        return try {
+            val index = legacyTxtFile.readText().trim().toIntOrNull() ?: -1
+            val config = mapOf<String, Any>("lastRepoIndex" to index)
+            JsonFileUtil.writeConfig(configFile, config)
+            legacyTxtFile.delete()
+            index
+        } catch (e: Exception) {
+            -1
+        }
+    }
+    return -1
 }
 
 private fun saveLastRepoIndex(file: File, index: Int) {
-    try {
-        file.parentFile?.mkdirs()
-        file.writeText(index.toString())
-    } catch (e: Exception) {
-        e.printStackTrace()
-    }
+    val existing = if (file.exists()) JsonFileUtil.readConfig(file) else emptyMap()
+    val updated = existing.toMutableMap()
+    updated["lastRepoIndex"] = index
+    JsonFileUtil.writeConfig(file, updated)
 }

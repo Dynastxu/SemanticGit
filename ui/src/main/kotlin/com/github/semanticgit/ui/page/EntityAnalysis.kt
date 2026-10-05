@@ -20,6 +20,7 @@ import com.github.semanticgit.core.dto.EntityChangeHistory
 import com.github.semanticgit.core.dto.HistoryEdge
 import com.github.semanticgit.core.dto.HistoryNode
 import com.github.semanticgit.ui.config.DbConfig
+import com.github.semanticgit.ui.JsonFileUtil
 import com.github.semanticgit.ui.LocalStrings
 import com.github.semanticgit.ui.view.chart.GitGraphView
 import kotlinx.coroutines.Dispatchers
@@ -70,6 +71,20 @@ fun EntityAnalysis(
     // 实体搜索自动补全
     var allEntities by remember { mutableStateOf<List<String>>(emptyList()) }
     var searchDropdownExpanded by remember { mutableStateOf(false) }
+
+    // 搜索历史
+    val searchHistoryFile = remember { File(System.getProperty("user.home"), ".semanticgit/search_history.json") }
+    val searchHistory = remember { mutableStateListOf<String>() }
+    var showSearchHistory by remember { mutableStateOf(false) }
+
+    // 加载搜索历史
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            val history = JsonFileUtil.readStringArray(searchHistoryFile)
+            searchHistory.clear()
+            searchHistory.addAll(history.take(50))
+        }
+    }
 
     // 仓库切换时加载分支和实体列表
     LaunchedEffect(selectedPath) {
@@ -154,8 +169,13 @@ fun EntityAnalysis(
                     value = searchQuery,
                     onValueChange = { newValue ->
                         searchQuery = newValue
-                        searchDropdownExpanded = newValue.isNotBlank()
-                                && allEntities.isNotEmpty()
+                        if (newValue.isBlank()) {
+                            searchDropdownExpanded = false
+                            showSearchHistory = searchHistory.isNotEmpty()
+                        } else {
+                            showSearchHistory = false
+                            searchDropdownExpanded = allEntities.isNotEmpty()
+                        }
                     },
                     placeholder = { Text(strings.searchEntityPlaceholder) },
                     leadingIcon = {
@@ -164,6 +184,27 @@ fun EntityAnalysis(
                             contentDescription = "Search",
                             modifier = Modifier.size(18.dp)
                         )
+                    },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(
+                                onClick = { searchQuery = "" },
+                                modifier = Modifier.size(18.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Clear,
+                                    contentDescription = "Clear",
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        } else if (searchHistory.isNotEmpty()) {
+                            Icon(
+                                imageVector = Icons.Default.History,
+                                contentDescription = strings.searchHistory,
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
@@ -211,6 +252,96 @@ fun EntityAnalysis(
                                             overflow = TextOverflow.Ellipsis,
                                             style = MaterialTheme.typography.bodyMedium
                                         )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (showSearchHistory) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 200.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surface
+                        )
+                    ) {
+                        Column {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = strings.searchHistory,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                TextButton(
+                                    onClick = {
+                                        searchHistory.clear()
+                                        showSearchHistory = false
+                                        scope.launch(Dispatchers.IO) {
+                                            JsonFileUtil.writeStringArray(searchHistoryFile, emptyList())
+                                        }
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                ) {
+                                    Text(
+                                        text = strings.clearSearchHistory,
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                }
+                            }
+                            LazyColumn {
+                                items(searchHistory.toList(), key = { it }) { entity ->
+                                    Surface(
+                                        onClick = {
+                                            searchQuery = entity
+                                            showSearchHistory = false
+                                        },
+                                        color = MaterialTheme.colorScheme.surface,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = entity,
+                                                modifier = Modifier.weight(1f),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                style = MaterialTheme.typography.bodyMedium
+                                            )
+                                            IconButton(
+                                                onClick = {
+                                                    searchHistory.remove(entity)
+                                                    scope.launch(Dispatchers.IO) {
+                                                        JsonFileUtil.writeStringArray(
+                                                            searchHistoryFile,
+                                                            searchHistory.toList()
+                                                        )
+                                                    }
+                                                },
+                                                modifier = Modifier.size(24.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Close,
+                                                    contentDescription = "Remove",
+                                                    modifier = Modifier.size(14.dp),
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -329,6 +460,9 @@ fun EntityAnalysis(
                     }
 
                     scope.launch {
+                        searchDropdownExpanded = false
+                        showSearchHistory = false
+                        addToSearchHistory(searchQuery, searchHistory, searchHistoryFile)
                         queryEntityChangeHistory(
                             repoPath = selectedPath!!,
                             entityName = searchQuery,
@@ -374,6 +508,7 @@ fun EntityAnalysis(
                     entityHistory = null
                     errorMessage = null
                     searchDropdownExpanded = false
+                    showSearchHistory = false
                 },
                 modifier = Modifier.weight(5f)
             ) {
@@ -721,6 +856,27 @@ private suspend fun searchAllEntities(repoPath: String): List<String> = withCont
     } catch (e: Exception) {
         e.printStackTrace()
         emptyList()
+    }
+}
+
+/**
+ * 将查询词加入搜索历史，去重并保持最近的在前面，限制最大条数
+ */
+private fun addToSearchHistory(
+    query: String,
+    history: MutableList<String>,
+    historyFile: File
+) {
+    if (query.isBlank()) return
+    history.removeAll { it.equals(query, ignoreCase = true) }
+    history.add(0, query)
+    while (history.size > 50) {
+        history.removeAt(history.lastIndex)
+    }
+    try {
+        JsonFileUtil.writeStringArray(historyFile, history.toList())
+    } catch (e: Exception) {
+        e.printStackTrace()
     }
 }
 

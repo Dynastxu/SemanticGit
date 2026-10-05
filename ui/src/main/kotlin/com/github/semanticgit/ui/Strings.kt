@@ -84,6 +84,8 @@ data class Strings(
     val flatListView: String,
     val traversalDfs: String,
     val traversalBfs: String,
+    val searchHistory: String,
+    val clearSearchHistory: String,
     val dbFileLoad: String,
     // Author Portrait
     val authorPortrait: String,
@@ -209,6 +211,8 @@ val ZhStrings = Strings(
     flatListView = "扁平列表视图",
     traversalDfs = "DFS (深度优先)",
     traversalBfs = "BFS (广度优先)",
+    searchHistory = "搜索历史",
+    clearSearchHistory = "清空历史",
     dbFileLoad = "从数据库加载",
     // Author Portrait
     authorPortrait = "作者画像",
@@ -333,6 +337,8 @@ val EnStrings = Strings(
     flatListView = "Flat List View",
     traversalDfs = "DFS (Depth First)",
     traversalBfs = "BFS (Breadth First)",
+    searchHistory = "Search History",
+    clearSearchHistory = "Clear History",
     dbFileLoad = "Load from Database",
     // Author Portrait
     authorPortrait = "Author Portrait",
