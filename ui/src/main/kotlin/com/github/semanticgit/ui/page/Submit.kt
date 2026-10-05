@@ -51,8 +51,7 @@ import com.github.semanticgit.core.StatisticsProvider
 import com.github.semanticgit.core.dto.CommitEntityChangeStatistics
 import com.github.semanticgit.core.db.DatabaseManager
 import com.github.semanticgit.ui.config.DbConfig
-import com.github.semanticgit.ui.view.CommitNode
-import com.github.semanticgit.ui.view.CommitTopologyGraph
+import com.github.semanticgit.ui.view.chart.GitGraphView
 import com.github.semanticgit.ui.LocalStrings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -84,8 +83,6 @@ fun Submit(
     var commitStatistics by remember { mutableStateOf<CommitEntityChangeStatistics?>(null) }
     var isLoadingStats by remember { mutableStateOf(false) }
 
-    var nodes by remember { mutableStateOf<List<CommitNode>>(emptyList()) }
-
     val dateFormatter = remember { SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()) }
 
     fun loadCommits(path: String) {
@@ -104,42 +101,10 @@ fun Submit(
                     }
                 }.let { commits ->
                     allCommits = commits
-
-                    val hashSet = commits.map { it.hash }.toSet()
-                    val hashToMeta = commits.associateBy { it.hash }
-                    val depthCache = mutableMapOf<String, Int>()
-
-                    fun calcDepth(hash: String): Int {
-                        depthCache[hash]?.let { return it }
-                        val meta = hashToMeta[hash] ?: return 0
-                        val parentDepth = meta.parentCommitMeta?.hash?.let { calcDepth(it) } ?: 0
-                        val depth = parentDepth + 1
-                        depthCache[hash] = depth
-                        return depth
-                    }
-
-                    val nodeList = commits.map { commit ->
-                        val depth = calcDepth(commit.hash)
-                        val isMerge = commit.mergeParentMeta != null
-                        CommitNode(
-                            hash = commit.hash,
-                            authorName = commit.author?.name ?: "Unknown",
-                            timestamp = commit.timestamp ?: 0,
-                            message = (commit.message ?: "").lines().first(),
-                            isMerge = isMerge,
-                            parentHash = commit.parentCommitMeta?.hash,
-                            mergeParentHash = commit.mergeParentMeta?.hash,
-                            depth = depth,
-                            lane = 0
-                        )
-                    }
-
-                    nodes = nodeList.sortedBy { it.depth }
                 }
             } catch (e: Exception) {
                 errorMessage = e.message ?: strings.commitFailedToLoad
                 allCommits = emptyList()
-                nodes = emptyList()
             } finally {
                 isLoading = false
             }
@@ -181,17 +146,6 @@ fun Submit(
             it.hash.lowercase().contains(q) ||
             (it.message ?: "").lowercase().contains(q) ||
             (it.author?.name ?: "").lowercase().contains(q)
-        }
-    }
-
-    val filteredNodes = if (searchQuery.isBlank()) {
-        nodes
-    } else {
-        val q = searchQuery.lowercase()
-        nodes.filter {
-            it.hash.lowercase().contains(q) ||
-            it.message.lowercase().contains(q) ||
-            it.authorName.lowercase().contains(q)
         }
     }
 
@@ -369,7 +323,7 @@ fun Submit(
                     style = MaterialTheme.typography.bodySmall
                 )
             }
-        } else if (nodes.isEmpty()) {
+        } else if (allCommits.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
@@ -389,14 +343,13 @@ fun Submit(
             }
         } else {
             Row(modifier = Modifier.fillMaxSize()) {
-                CommitTopologyGraph(
-                    nodes = filteredNodes,
-                    selectedHash = selectedCommitHash,
+                GitGraphView(
+                    commits = filteredCommits,
                     onCommitClick = { hash ->
                         selectedCommitHash = hash
                         loadCommitStats(hash)
                     },
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f).fillMaxHeight()
                 )
 
                 if (selectedCommitHash != null) {
@@ -586,5 +539,4 @@ private fun flagColor(flag: ChangeNatureFlag): Color = when (flag) {
     ChangeNatureFlag.STYLE -> Color(0xFF795548)
     ChangeNatureFlag.TEST -> Color(0xFF00BCD4)
     ChangeNatureFlag.DOCS -> Color(0xFF607D8B)
-    else -> Color.Gray
 }

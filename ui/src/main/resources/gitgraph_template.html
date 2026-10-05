@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <script>__GITGRAPH_JS__</script>
+    <style>
+        html, body {
+            margin: 0; padding: 0;
+            width: 100%; height: 100%;
+            overflow: hidden;
+            background: transparent !important;
+            --vscode-editor-background: transparent;
+            color-scheme: light;
+        }
+        web-git-graph {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+    </style>
+</head>
+<body>
+<web-git-graph id="graph" theme="light"></web-git-graph>
+<script>
+    var graph = document.getElementById('graph');
+
+    graph.shadowRoot.appendChild(function() {
+        var s = document.createElement('style');
+        s.textContent = '.toolbar{display:none!important}.header{display:none!important}' +
+            '.shell{grid-template-rows:minmax(0,1fr)!important}.history{grid-template-rows:minmax(0,1fr)!important}';
+        return s;
+    }());
+
+    var lastSelectedOid = null;
+
+    window.__clickStamp = 0;
+    window.__pendingOid = null;
+
+    graph.selectCommit = function(oid) {
+        var root = graph.shadowRoot;
+        var rows = root.querySelectorAll('.row.selected');
+        for (var i = 0; i < rows.length; i++) {
+            rows[i].classList.remove('selected');
+        }
+
+        if (!oid) return;
+
+        if (lastSelectedOid === oid) {
+            lastSelectedOid = null;
+            return;
+        }
+        lastSelectedOid = oid;
+
+        var row = root.querySelector('.row[data-oid="' + oid + '"]');
+        if (row) row.classList.add('selected');
+
+        window.__clickStamp = Date.now();
+        window.__pendingOid = oid;
+    };
+
+    function updateData(dataJson) {
+        try {
+            var data = JSON.parse(dataJson);
+            graph.data = data;
+        } catch(e) {
+            console.error('updateData error:', e);
+        }
+    }
+
+    function updateRefs(refsJson) {
+        if (refsJson) {
+            graph.refs = JSON.parse(refsJson);
+        }
+    }
+
+    function scrollBy(deltaY) {
+        graph.dispatchEvent(new WheelEvent('wheel', {
+            deltaY: deltaY,
+            deltaMode: 0,
+            bubbles: true,
+            cancelable: true
+        }));
+    }
+
+    graph.addEventListener('gitgraph-commit-select', function (e) {
+        if (window.javaBridge && window.javaBridge.onCommitClick) {
+            var commit = e.detail && e.detail.commit;
+            window.javaBridge.onCommitClick(commit ? commit.oid : '');
+        }
+    });
+</script>
+</body>
+</html>
