@@ -189,12 +189,38 @@ fun RepoPage(
         lastAnalyzedConfig = ""
     }
 
+    fun loadExistingStatistics(repoPath: String) {
+        scope.launch {
+            val dbDir = "${System.getProperty("user.home", "")}/.semanticgit/db"
+            val dbName = Integer.toHexString(File(repoPath).absolutePath.hashCode())
+            val dbFile = File(dbDir, "$dbName.db")
+            if (!dbFile.exists()) return@launch
+            try {
+                DatabaseManager(dbDir, dbName, false).use { dbManager ->
+                    val provider = StatisticsProvider(dbManager)
+                    val stats = provider.simpleEntityChangeStatistics
+                    if (stats != null && stats.isSuccess) {
+                        statistics = stats
+                        lastAnalyzedConfig = currentConfigFingerprint
+                        configExpanded = false
+                    }
+                }
+            } catch (e: Exception) {
+                logger.error(e) { "loadExistingStatistics failed for $repoPath" }
+            }
+        }
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp)
     ) {
+        LaunchedEffect(selectedPath) {
+            selectedPath?.let { loadExistingStatistics(it) }
+        }
+
         // ============ 顶部：仓库选择（固定） ============
         RepoSelector(
             repoPaths = repoPaths,
@@ -206,6 +232,7 @@ fun RepoPage(
                 onSelectedRepoIndexChanged(index)
                 dropdownExpanded = false
                 resetRepoState()
+                loadExistingStatistics(repoPaths[index])
             },
             onAddRepo = {
                 val chooser = JFileChooser()
@@ -222,6 +249,7 @@ fun RepoPage(
                         onSelectedRepoIndexChanged(repoPaths.size - 1)
                     }
                     resetRepoState()
+                    loadExistingStatistics(newPath)
                 }
             }
         )

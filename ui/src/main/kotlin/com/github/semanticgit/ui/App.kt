@@ -93,6 +93,8 @@ private fun WindowScope.SemanticGitApp(
 
     val repoHistoryFile = remember { File(System.getProperty("user.home"), ".semanticgit/repos.txt") }
 
+    val lastRepoIndexFile = remember { File(System.getProperty("user.home"), ".semanticgit/last_repo.txt") }
+
     val repoPaths = remember {
         mutableStateListOf<String>().also { list ->
             loadRepoPaths(repoHistoryFile).forEach { path ->
@@ -100,12 +102,24 @@ private fun WindowScope.SemanticGitApp(
             }
         }
     }
+
     var selectedRepoIndex by remember {
-        mutableStateOf(if (repoPaths.isNotEmpty()) 0 else -1)
+        val savedIndex = loadLastRepoIndex(lastRepoIndexFile)
+        mutableStateOf(
+            when {
+                repoPaths.isNotEmpty() && savedIndex in repoPaths.indices -> savedIndex
+                repoPaths.isNotEmpty() -> 0
+                else -> -1
+            }
+        )
     }
 
     LaunchedEffect(repoPaths.toList()) {
         saveRepoPaths(repoHistoryFile, repoPaths.toList())
+    }
+
+    LaunchedEffect(selectedRepoIndex) {
+        saveLastRepoIndex(lastRepoIndexFile, selectedRepoIndex)
     }
 
     val navItems = listOf(
@@ -228,6 +242,24 @@ private fun saveRepoPaths(file: File, paths: List<String>) {
     try {
         file.parentFile?.mkdirs()
         file.writeText(paths.joinToString("\n"))
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+}
+
+private fun loadLastRepoIndex(file: File): Int {
+    if (!file.exists()) return -1
+    return try {
+        file.readText().trim().toIntOrNull() ?: -1
+    } catch (e: Exception) {
+        -1
+    }
+}
+
+private fun saveLastRepoIndex(file: File, index: Int) {
+    try {
+        file.parentFile?.mkdirs()
+        file.writeText(index.toString())
     } catch (e: Exception) {
         e.printStackTrace()
     }
