@@ -116,7 +116,7 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
                     onProgress.accept(1.0f);
                 }
             } else {
-                int totalCommits = gitService.countCommitsBetween(firstHash, lastHash);
+                int totalCommits = gitService.countCommitsBetween(firstHash, lastHash) + 1;
                 AtomicInteger processed = new AtomicInteger(0);
                 AtomicInteger inProgress = new AtomicInteger(0);
 
@@ -127,6 +127,26 @@ public class AnalysisEngine extends AbstractAnalysisEngine {
                         0L, TimeUnit.MILLISECONDS,
                         new LinkedBlockingQueue<>(EngineConfigs.getMaxQueue()),
                         new ThreadPoolExecutor.CallerRunsPolicy())) {
+
+                    futures.add(CompletableFuture.runAsync(() -> {
+                        try {
+                            GitCommitInfo firstInfo = gitService.getCommitInfo(firstHash);
+                            CommitMeta firstMeta = commitMetaMap.get(firstInfo.getCommitHash());
+                            if (firstMeta != null) {
+                                List<ChangeLog> changeLogs = analyzeDiff(firstInfo.getDiffEntries(), firstMeta);
+                                synchronized (changeLogDao) {
+                                    changeLogDao.saveAll(changeLogs);
+                                }
+                                int cur = processed.incrementAndGet();
+                                if (onProgress != null) {
+                                    onProgress.accept((float) cur / totalCommits);
+                                }
+                                log.info("Analyzed commit {}/{}: {} changes", cur, totalCommits, changeLogs.size());
+                            }
+                        } catch (java.io.IOException e) {
+                            log.error("Failed to get commit info for firstHash {}", firstHash, e);
+                        }
+                    }, executor));
 
                     gitService.forEachCommitBetween(firstHash, lastHash, info -> {
                         CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {

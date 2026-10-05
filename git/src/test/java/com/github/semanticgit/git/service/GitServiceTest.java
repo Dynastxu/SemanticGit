@@ -1,13 +1,14 @@
 package com.github.semanticgit.git.service;
 
-import com.github.semanticgit.common.entity.Author;
 import com.github.semanticgit.common.entity.ChangeOperation;
 import com.github.semanticgit.common.entity.CommitMeta;
 import com.github.semanticgit.git.dto.GitCommitInfo;
 import com.github.semanticgit.git.dto.GitDiffEntry;
+import org.jspecify.annotations.NonNull;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -40,14 +41,14 @@ class GitServiceTest {
         if (repo != null) repo.close();
     }
 
-    private GitService service() throws Exception {
+    private GitService service() {
         if (gitService == null) {
             gitService = new GitService(repo.repository());   // ← 用 TestRepo 的 Repository
         }
         return gitService;
     }
 
-    private static Map<String, GitDiffEntry> byNewPath(List<GitDiffEntry> diffs) {
+    private static Map<String, GitDiffEntry> byNewPath(@NonNull List<GitDiffEntry> diffs) {
         return diffs.stream()
                 .filter(e -> e.getNewPath() != null)
                 .collect(Collectors.toMap(GitDiffEntry::getNewPath, Function.identity()));
@@ -60,16 +61,22 @@ class GitServiceTest {
     class Constructor {
         @Test void workspaceRoot() throws Exception {
             repo.commitFile("test.txt", "test", "init");
-            assertDoesNotThrow(() -> new GitService(tempDir.toString()));
+            try (GitService ignored = new GitService(tempDir.toString())) {
+                // constructor should not throw
+            }
         }
 
         @Test void dotGitDir() throws Exception {
             repo.commitFile("test.txt", "test", "init");
-            assertDoesNotThrow(() -> new GitService(tempDir.resolve(".git").toString()));
+            try (GitService ignored = new GitService(tempDir.resolve(".git").toString())) {
+                // constructor should not throw
+            }
         }
 
-        @Test void emptyRepo() {
-            assertDoesNotThrow(() -> new GitService(tempDir.toString()));
+        @Test void emptyRepo() throws IOException {
+            try (GitService ignored = new GitService(tempDir.toString())) {
+                // constructor should not throw
+            }
         }
     }
 
@@ -236,7 +243,7 @@ class GitServiceTest {
                     () -> assertTrue(info.isMergeCommit()),
                     () -> assertEquals(2, info.getParentCount()),
                     () -> assertEquals(2, info.getParentHashes().size()),
-                    () -> assertEquals(info.getParentHashes().get(0),
+                    () -> assertEquals(info.getParentHashes().getFirst(),
                             info.getDiffBaseParentHash())
             );
 
@@ -269,7 +276,7 @@ class GitServiceTest {
             List<GitCommitInfo> commits = service().getCommitsBetween(c1, c3);
             assertEquals(2, commits.size());
             assertAll(
-                    () -> assertEquals(c3, commits.get(0).getCommitHash()),
+                    () -> assertEquals(c3, commits.getFirst().getCommitHash()),
                     () -> assertEquals(c2, commits.get(1).getCommitHash())
             );
         }
@@ -441,15 +448,17 @@ class GitServiceTest {
     class Resources {
         @Test void close() throws Exception {
             repo.commitFile("test.txt", "test", "init");
-            GitService s = new GitService(tempDir.toString());
-            assertDoesNotThrow(s::close);
+            try (GitService s = new GitService(tempDir.toString())) {
+                assertDoesNotThrow(s::close);
+            }
         }
 
         @Test void closeIdempotent() throws Exception {
             repo.commitFile("test.txt", "test", "init");
-            GitService s = new GitService(tempDir.toString());
-            s.close();
-            assertDoesNotThrow(s::close);
+            try (GitService s = new GitService(tempDir.toString())) {
+                s.close();
+                assertDoesNotThrow(s::close);
+            }
         }
     }
 
@@ -593,7 +602,7 @@ class GitServiceTest {
         }
     }
     @Nested
-    @DisplayName("First-Parent 遍历")
+    @DisplayName("全分支遍历")
     class FirstParent {
 
         /**
@@ -627,44 +636,44 @@ class GitServiceTest {
         }
 
         @Test
-        @DisplayName("getAllCommits 应排除 feature 分支的提交")
+        @DisplayName("getAllCommits 应包含 feature 分支的提交")
         void allCommitsExcludesFeature() throws Exception {
             String[] h = buildMergeScenario();
             List<String> actual = service().getAllCommits().stream()
                     .map(CommitMeta::getHash).toList();
 
-            assertEquals(List.of(h[3], h[2], h[0]), actual);
-            assertFalse(actual.contains(h[1]), "feature 分支的 B 不应出现");
+            assertEquals(List.of(h[3], h[2], h[1], h[0]), actual);
+            assertTrue(actual.contains(h[1]), "feature 分支的 B 应出现");
         }
 
         @Test
-        @DisplayName("getCommitsBetween 应排除 feature 分支的提交")
+        @DisplayName("getCommitsBetween 应包含 feature 分支的提交")
         void commitsBetweenExcludesFeature() throws Exception {
             String[] h = buildMergeScenario();
             List<String> actual = service().getCommitsBetween(h[0], h[3]).stream()
                     .map(GitCommitInfo::getCommitHash).toList();
 
-            assertEquals(List.of(h[3], h[2]), actual);
-            assertFalse(actual.contains(h[1]));
+            assertEquals(List.of(h[3], h[2], h[1]), actual);
+            assertTrue(actual.contains(h[1]));
         }
 
         @Test
-        @DisplayName("countCommitsBetween 应只数 first-parent 链上的提交")
+        @DisplayName("countCommitsBetween 应包含全部分支提交")
         void countExcludesFeature() throws Exception {
             String[] h = buildMergeScenario();
-            assertEquals(2, service().countCommitsBetween(h[0], h[3]));
+            assertEquals(3, service().countCommitsBetween(h[0], h[3]));
         }
 
         @Test
-        @DisplayName("forEachCommitBetween 应只遍历 first-parent 链")
+        @DisplayName("forEachCommitBetween 应遍历全部分支提交")
         void forEachExcludesFeature() throws Exception {
             String[] h = buildMergeScenario();
             List<String> collected = new ArrayList<>();
             service().forEachCommitBetween(h[0], h[3],
                     info -> collected.add(info.getCommitHash()));
 
-            assertEquals(List.of(h[3], h[2]), collected);
-            assertFalse(collected.contains(h[1]));
+            assertEquals(List.of(h[3], h[2], h[1]), collected);
+            assertTrue(collected.contains(h[1]));
         }
     }
     @Nested
