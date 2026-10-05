@@ -67,7 +67,8 @@ import com.github.semanticgit.ui.config.DbConfig
 import com.github.semanticgit.ui.LocalStrings
 import com.github.semanticgit.ui.LocalThemeMode
 import com.github.semanticgit.ui.ThemeMode
-import com.github.semanticgit.ui.view.chart.EChartsView
+import com.github.semanticgit.ui.view.chart.MultiChartDisplay
+import com.github.semanticgit.ui.view.chart.PieDataItem
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -854,24 +855,24 @@ private fun StatisticsContent(
     val themeMode = LocalThemeMode.current
     val isDark = themeMode == ThemeMode.Dark
 
-    val operationOptionJson = remember(statistics, strings, isDark) {
-        buildRoseChartOption(
-            title = strings.repoOperationDistribution,
-            dataMap = statistics.operationFloatMap ?: emptyMap(),
-            entries = ChangeOperation.entries.toList(),
-            nameExtractor = { it.desc },
-            darkMode = isDark
-        )
+    val operationData = remember(statistics) {
+        val map = statistics.operationFloatMap ?: emptyMap()
+        ChangeOperation.entries.map { entry ->
+            PieDataItem(
+                name = entry.desc,
+                value = ((map[entry] ?: 0f) * 100).toDouble()
+            )
+        }
     }
 
-    val natureOptionJson = remember(statistics, strings, isDark) {
-        buildRoseChartOption(
-            title = strings.repoNatureDistribution,
-            dataMap = statistics.natureFlagFloatMap ?: emptyMap(),
-            entries = ChangeNatureFlag.entries.toList(),
-            nameExtractor = { it.name.lowercase() },
-            darkMode = isDark
-        )
+    val natureData = remember(statistics) {
+        val map = statistics.natureFlagFloatMap ?: emptyMap()
+        ChangeNatureFlag.entries.map { entry ->
+            PieDataItem(
+                name = entry.name.lowercase(),
+                value = ((map[entry] ?: 0f) * 100).toDouble()
+            )
+        }
     }
 
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -897,17 +898,19 @@ private fun StatisticsContent(
             enter = fadeIn(animationSpec = tween(400))
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth().height(400.dp),
+                modifier = Modifier.fillMaxWidth().height(440.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                EChartsView(
-                    optionJson = operationOptionJson,
+                MultiChartDisplay(
+                    data = operationData,
+                    title = strings.repoOperationDistribution,
                     darkMode = isDark,
                     modifier = Modifier.weight(1f).fillMaxHeight()
                 )
 
-                EChartsView(
-                    optionJson = natureOptionJson,
+                MultiChartDisplay(
+                    data = natureData,
+                    title = strings.repoNatureDistribution,
                     darkMode = isDark,
                     modifier = Modifier.weight(1f).fillMaxHeight()
                 )
@@ -916,57 +919,6 @@ private fun StatisticsContent(
 
         Spacer(modifier = Modifier.height(16.dp))
     }
-}
-
-// ==================== 图表 Option 构建 ====================
-
-private fun <T> buildRoseChartOption(
-    title: String,
-    dataMap: Map<T, Float>,
-    entries: List<T>,
-    nameExtractor: (T) -> String,
-    darkMode: Boolean = false
-): String {
-    val dataItems = entries.joinToString(",") { entry ->
-        val value = ((dataMap[entry] ?: 0f) * 100).toInt()
-        """{"value":$value,"name":"${nameExtractor(entry)}"}"""
-    }
-    val legendItems = entries.joinToString(",") { """"${nameExtractor(it)}"""" }
-
-    val titleColor = if (darkMode) "#E2E2E6" else "#1A1C1E"
-    val legendColor = if (darkMode) "#C3C7CF" else "#43474E"
-
-    return """
-        {
-            "backgroundColor": "transparent",
-            "title": {
-                "text": "$title",
-                "left": "center",
-                "textStyle": { "color": "$titleColor" }
-            },
-            "tooltip": { "trigger": "item", "formatter": "{b} : {d}%" },
-            "legend": {
-                "left": "center",
-                "top": "bottom",
-                "textStyle": { "color": "$legendColor" },
-                "data": [$legendItems]
-            },
-            "animationDuration": 800,
-            "animationEasing": "cubicOut",
-            "series": [{
-                "type": "pie",
-                "radius": [20, 140],
-                "roseType": "radius",
-                "itemStyle": { "borderRadius": 5 },
-                "label": { "show": false },
-                "emphasis": { "label": { "show": true } },
-                "animationType": "scale",
-                "animationEasing": "elasticOut",
-                "animationDelay": "function (idx) { return idx * 100; }",
-                "data": [$dataItems]
-            }]
-        }
-    """.trimIndent()
 }
 
 // ==================== 分析结果 ====================
