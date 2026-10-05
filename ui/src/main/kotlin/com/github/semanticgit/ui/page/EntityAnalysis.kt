@@ -9,7 +9,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.github.semanticgit.common.entity.ChangeLog
@@ -22,9 +21,7 @@ import com.github.semanticgit.core.dto.HistoryEdge
 import com.github.semanticgit.core.dto.HistoryNode
 import com.github.semanticgit.ui.config.DbConfig
 import com.github.semanticgit.ui.LocalStrings
-import com.github.semanticgit.ui.view.chart.Dag
-import com.github.semanticgit.ui.view.chart.DagListView
-import com.github.semanticgit.ui.view.chart.DagNode
+import com.github.semanticgit.ui.view.chart.GitGraphView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -541,29 +538,11 @@ private fun EntityChangeHistoryCard(
 
             // 内容区域
             if (showDagView && hasNodes) {
-                val dag = remember(nodes, edges) { buildDag(nodes, edges) }
-                DagListView(
-                    dag = dag,
-                    comparator = compareByDescending { it.depth },
+                val gitJson = remember(nodes, edges, refName) { buildNodesJson(nodes, edges, refName) }
+                GitGraphView(
                     modifier = Modifier.fillMaxSize(),
-                    rowHeight = 54.dp,
-                    laneWidth = 22.dp,
-                    nodeRadius = 5.dp,
-                ) { node ->
-                    Text(
-                        text = "${node.commitHash.take(7)} ${node.shortMessage}",
-                        style = MaterialTheme.typography.bodySmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    if (node.isMergeCommit) {
-                        Text(
-                            text = " [M]",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFFF9A825)
-                        )
-                    }
-                }
+                    jsonData = gitJson
+                )
             } else {
                 // 扁平列表视图
                 LazyColumn(
@@ -578,33 +557,45 @@ private fun EntityChangeHistoryCard(
     }
 }
 
-private fun buildDag(nodes: List<HistoryNode>, edges: List<HistoryEdge>): Dag<HistoryNode> {
-    val nodeByHash = nodes.associateBy { it.commitHash }
-    val childHashByParent = mutableMapOf<String, MutableList<String>>()
-    val allChildHashes = mutableSetOf<String>()
-
+private fun buildNodesJson(nodes: List<HistoryNode>, edges: List<HistoryEdge>, refName: String): String {
+    val parentsByHash = mutableMapOf<String, MutableList<String>>()
+    val allParentHashes = mutableSetOf<String>()
     for (edge in edges) {
         if (edge.fromHash != null && edge.toHash != null) {
-            childHashByParent.getOrPut(edge.fromHash) { mutableListOf() }.add(edge.toHash)
-            allChildHashes.add(edge.toHash)
+            parentsByHash.getOrPut(edge.toHash) { mutableListOf() }.add(edge.fromHash)
+            allParentHashes.add(edge.fromHash)
         }
     }
+    val tipHashes = nodes.map { it.commitHash }.filter { it !in allParentHashes }
 
-    val rootHashes = nodes.map { it.commitHash }.filter { it !in allChildHashes }
-
-    val dagNodeByHash = nodeByHash.mapValues { (_, node) ->
-        DagNode(data = node, children = emptyList())
-    }.toMutableMap()
-
-    for ((parentHash, childHashes) in childHashByParent) {
-        val parentNode = dagNodeByHash[parentHash] ?: continue
-        val childNodes = childHashes.mapNotNull { dagNodeByHash[it] }
-        dagNodeByHash[parentHash] = parentNode.copy(children = childNodes)
+    val sb = StringBuilder()
+    sb.append("{\"commits\":[")
+    nodes.forEachIndexed { i, node ->
+        if (i > 0) sb.append(",")
+        sb.append("{\"oid\":\"${node.commitHash}\"")
+        val parents = parentsByHash[node.commitHash].orEmpty()
+        sb.append(",\"parents\":[")
+        parents.forEachIndexed { pi, p ->
+            if (pi > 0) sb.append(",")
+            sb.append("\"$p\"")
+        }
+        sb.append("]")
+        sb.append(",\"message\":\"${node.shortMessage.escapeJson()}\"")
+        sb.append(",\"author\":{\"name\":\"${node.authorName.escapeJson()}\"}")
+        sb.append(",\"committedAt\":${node.timestamp}")
+        sb.append("}")
     }
-
-    val rootNodes = rootHashes.mapNotNull { dagNodeByHash[it] }
-    return Dag(nodes = rootNodes)
+    sb.append("],\"refs\":[")
+    tipHashes.forEachIndexed { i, hash ->
+        if (i > 0) sb.append(",")
+        sb.append("{\"name\":\"${refName.escapeJson()}\",\"oid\":\"$hash\",\"kind\":\"head\"}")
+    }
+    sb.append("]}")
+    return sb.toString()
 }
+
+private fun String.escapeJson(): String =
+    replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ").replace("\r", " ")
 
 /**
  * 单条变更日志项

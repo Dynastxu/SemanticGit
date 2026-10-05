@@ -51,7 +51,8 @@ fun GitGraphView(
     modifier: Modifier = Modifier,
     commits: List<CommitMeta> = emptyList(),
     refs: List<RefInfo> = emptyList(),
-    onCommitClick: ((hash: String) -> Unit)? = null
+    onCommitClick: ((hash: String) -> Unit)? = null,
+    jsonData: String? = null
 ) {
     val jfxPanel = remember {
         JFXPanel().also {
@@ -133,7 +134,9 @@ fun GitGraphView(
         }
     }
 
-    val commitsJson = remember(commits) { commitsToJson(commits, refs) }
+    val commitsJson = remember(commits, refs, jsonData) {
+        jsonData ?: commitsToJson(commits, refs)
+    }
 
     LaunchedEffect(commitsJson, pageReady.value) {
         logger.debug { "LaunchedEffect data: pageReady=${pageReady.value}, commitsJson.length=${commitsJson.length}, webViewRef=${webViewRef.value != null}" }

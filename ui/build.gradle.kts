@@ -51,14 +51,6 @@ tasks.register<JavaExec>("runEChartsDemo") {
     jvmArgs = commonJvmArgs
 }
 
-tasks.register<JavaExec>("runDagListDemo") {
-    group = "demo"
-    description = "Run DAG List Demo"
-    classpath = sourceSets["test"].runtimeClasspath
-    mainClass.set("com.github.semanticgit.ui.view.chart.DagListViewDemoKt")
-    jvmArgs = commonJvmArgs
-}
-
 tasks.register<JavaExec>("runPieChartDemo") {
     group = "demo"
     description = "Run Pie Chart Demo"
