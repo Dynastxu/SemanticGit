@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -175,7 +176,7 @@ fun RepoPage(
                 }
             } catch (e: Exception) {
                 errorMessage = e.message ?: strings.repoAnalysisFailed
-                e.printStackTrace()
+                logger.error(e) { "executeCoreAnalysis failed" }
             } finally {
                 isAnalyzing = false
             }
@@ -191,6 +192,7 @@ fun RepoPage(
     Column(
         modifier = modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp)
     ) {
         // ============ 顶部：仓库选择（固定） ============
@@ -261,8 +263,8 @@ fun RepoPage(
 
         Box(
             modifier = Modifier
-                .weight(1f)
                 .fillMaxWidth()
+                .heightIn(min = 300.dp)
         ) {
             when {
                 selectedPath == null -> {
@@ -844,11 +846,7 @@ private fun StatisticsContent(
         )
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-    ) {
+    Column(modifier = Modifier.fillMaxWidth()) {
         Text(
             text = "${strings.repoAnalysisStatus}: ${if (statistics.isSuccess) "OK" else "FAILED"}",
             style = MaterialTheme.typography.titleMedium,
@@ -972,19 +970,19 @@ private suspend fun executeCoreAnalysis(
                     if (dbFile.exists()) dbFile.delete()
                     val future = engine.fullAnalysisAsync(
                         repoPath, dbDir, dbName, onProgress
-                    ) { e -> e.printStackTrace(); null }
+                    ) { e -> logger.error(e) { "fullAnalysis failed" }; null }
                     future.join()
                 }
                 AnalysisMode.INCREMENTAL -> {
                     if (dbFile.exists()) {
                         val future = engine.incrementalAnalysisAsync(
                             repoPath, dbFile, onProgress
-                        ) { e -> e.printStackTrace(); null }
+                        ) { e -> logger.error(e) { "incrementalAnalysis failed" }; null }
                         future.join()
                     } else {
                         val future = engine.fullAnalysisAsync(
                             repoPath, dbDir, dbName, onProgress
-                        ) { e -> e.printStackTrace(); null }
+                        ) { e -> logger.error(e) { "fullAnalysis failed" }; null }
                         future.join()
                     }
                 }
@@ -1000,7 +998,7 @@ private suspend fun executeCoreAnalysis(
                 }
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            logger.error(e) { "executeCoreAnalysis failed" }
             AnalysisResult.Error(e.message ?: "Unknown error during analysis")
         }
     }
@@ -1028,7 +1026,7 @@ private fun applyParserConfigs(settings: ParserSettings) {
                     "maxDepth=${settings.maxDepth}, maxQueue=${settings.maxQueue}, threshold=${settings.signatureMatchThreshold}, javaLevel=${settings.javaLevel}"
         }
     } catch (e: Exception) {
-        System.err.println("[Warning] Failed to apply parser configs: ${e.message}")
+        logger.error(e) { "[Warning] Failed to apply parser configs: ${e.message}" }
     }
 }
 
