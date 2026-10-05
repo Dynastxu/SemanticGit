@@ -26,9 +26,8 @@ import com.github.semanticgit.core.db.DatabaseManager
 import com.github.semanticgit.core.dto.AuthorChangeStatistics
 import com.github.semanticgit.ui.config.DbConfig
 import com.github.semanticgit.ui.LocalStrings
-import com.github.semanticgit.ui.view.chart.DropdownCorner
-import com.github.semanticgit.ui.view.chart.MultiChartDisplay
-import com.github.semanticgit.ui.view.chart.PieDataItem
+import com.github.semanticgit.ui.view.chart.SunburstChart
+import com.github.semanticgit.ui.view.chart.SunburstDataItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -265,17 +264,35 @@ fun AutoPortrait(
             }
         }
 
-        val authorCommitData = remember(allAuthors, authorCommitCounts) {
-            if (authorCommitCounts.isNotEmpty()) {
-                allAuthors.map { author ->
+        val sunburstData = remember(allAuthors, authorCommitCounts, authorStatsMap) {
+            if (authorCommitCounts.isNotEmpty() && allAuthors.isNotEmpty()) {
+                val totalCommits = authorCommitCounts.values.sum().toDouble()
+                allAuthors.mapNotNull { author ->
                     val key = "${author.name}|${author.email}"
                     val count = authorCommitCounts[key] ?: 0
-                    PieDataItem(name = author.name, value = count.toDouble())
-                }.filter { it.value > 0.0 }
-                    .sortedByDescending { it.value }
-            } else {
-                emptyList()
-            }
+                    if (count == 0) return@mapNotNull null
+                    val authorPct = (count.toDouble() / totalCommits) * 100.0
+                    val stats = authorStatsMap[author.id]
+                    val natureEntries = stats?.natureFlagFloatMap?.entries
+                        ?.filter { it.value > 0f }
+                    val natureChildren = if (natureEntries.isNullOrEmpty()) {
+                        null
+                    } else {
+                        val natureTotal = natureEntries.sumOf { it.value.toDouble() }
+                        natureEntries.map { (flag, value) ->
+                            val flagPct = if (natureTotal > 0.0) {
+                                (value.toDouble() / natureTotal) * authorPct
+                            } else 0.0
+                            SunburstDataItem(name = flag.name, value = flagPct)
+                        }
+                    }
+                    SunburstDataItem(
+                        name = author.name,
+                        value = authorPct,
+                        children = natureChildren
+                    )
+                }.sortedByDescending { it.value ?: 0.0 }
+            } else emptyList()
         }
 
         errorMessage?.let { msg ->
@@ -334,19 +351,18 @@ fun AutoPortrait(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    if (authorCommitData.isNotEmpty()) {
+                    if (sunburstData.isNotEmpty()) {
                         item(key = "chart") {
                             Card(
-                                modifier = Modifier.fillMaxWidth().height(350.dp),
+                                modifier = Modifier.fillMaxWidth().height(450.dp),
                                 colors = CardDefaults.cardColors(
                                     containerColor = MaterialTheme.colorScheme.surface
                                 ),
                                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                             ) {
-                                MultiChartDisplay(
-                                    data = authorCommitData,
+                                SunburstChart(
+                                    data = sunburstData,
                                     title = strings.authorCommitProportion,
-                                    dropdownCorner = DropdownCorner.TopRight,
                                     modifier = Modifier.fillMaxSize().padding(12.dp)
                                 )
                             }

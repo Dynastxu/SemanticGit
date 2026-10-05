@@ -123,28 +123,25 @@ private val roseDemoData = listOf(
     PieDataItem("母婴用品", 310.0)
 )
 
-private val sunburstDemoData = SunburstDataItem(
-    name = "项目总览",
-    children = listOf(
-        SunburstDataItem(name = "前端", children = listOf(
-            SunburstDataItem(name = "React", value = 120.0),
-            SunburstDataItem(name = "Vue", value = 80.0),
-            SunburstDataItem(name = "Angular", value = 45.0)
-        )),
-        SunburstDataItem(name = "后端", children = listOf(
-            SunburstDataItem(name = "Kotlin", value = 200.0),
-            SunburstDataItem(name = "Java", value = 150.0),
-            SunburstDataItem(name = "Python", value = 130.0),
-            SunburstDataItem(name = "Go", value = 70.0)
-        )),
-        SunburstDataItem(name = "数据库", children = listOf(
-            SunburstDataItem(name = "PostgreSQL", value = 90.0),
-            SunburstDataItem(name = "MySQL", value = 75.0),
-            SunburstDataItem(name = "MongoDB", value = 50.0)
-        )),
-        SunburstDataItem(name = "运维", children = listOf(
-            SunburstDataItem(name = "Docker", value = 60.0),
-            SunburstDataItem(name = "K8s", value = 40.0)
-        ))
-    )
+private val sunburstDemoData = listOf(
+    SunburstDataItem(name = "前端", children = listOf(
+        SunburstDataItem(name = "React", value = 120.0),
+        SunburstDataItem(name = "Vue", value = 80.0),
+        SunburstDataItem(name = "Angular", value = 45.0)
+    )),
+    SunburstDataItem(name = "后端", children = listOf(
+        SunburstDataItem(name = "Kotlin", value = 200.0),
+        SunburstDataItem(name = "Java", value = 150.0),
+        SunburstDataItem(name = "Python", value = 130.0),
+        SunburstDataItem(name = "Go", value = 70.0)
+    )),
+    SunburstDataItem(name = "数据库", children = listOf(
+        SunburstDataItem(name = "PostgreSQL", value = 90.0),
+        SunburstDataItem(name = "MySQL", value = 75.0),
+        SunburstDataItem(name = "MongoDB", value = 50.0)
+    )),
+    SunburstDataItem(name = "运维", children = listOf(
+        SunburstDataItem(name = "Docker", value = 60.0),
+        SunburstDataItem(name = "K8s", value = 40.0)
+    ))
 )

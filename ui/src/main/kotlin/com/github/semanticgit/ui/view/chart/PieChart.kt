@@ -94,7 +94,7 @@ data class SunburstDataItem(
 
 @Composable
 fun SunburstChart(
-    data: SunburstDataItem,
+    data: List<SunburstDataItem>,
     title: String? = null,
     radius: Pair<String, String> = Pair("15%", "90%"),
     center: Pair<String, String> = Pair("50%", "50%"),
@@ -114,12 +114,12 @@ fun SunburstChart(
 }
 
 internal fun buildSunburstOptionJson(
-    data: SunburstDataItem,
+    data: List<SunburstDataItem>,
     title: String?,
     radius: Pair<String, String>,
     center: Pair<String, String>
 ): String {
-    val dataJson = buildSunburstDataJson(data)
+    val dataJson = data.joinToString(",") { buildSunburstDataJson(it) }
     val titleJson = if (title != null) {
         val escaped = title.replace("\\", "\\\\").replace("\"", "\\\"")
         ""","title":{"text":"$escaped","left":"center"}"""
