@@ -39,17 +39,44 @@ public class JavaParser extends AbstractParser {
             "(?:public\\s+|private\\s+|protected\\s+)?(?:abstract\\s+|final\\s+)?class\\s+(\\w+)",
             Pattern.MULTILINE);
 
+    /**
+     * 方法声明正则. 基础结构: (修饰符可选)(返回类型必填) 方法名(参数) {.
+     * 注意: 负向前瞻和复杂回退处理放在 extractWithRegex 的后置过滤里,
+     * Pattern 本身保持简单 — 后置过滤比正则引擎回退逻辑更可靠.
+     * group(1)=方法名, group(2)=参数 — 与 extractWithRegex 硬编码对齐.
+     */
     private static final Pattern METHOD_DECL_PATTERN = Pattern.compile(
-            "(?:public\\s+|private\\s+|protected\\s+)?(?:static\\s+)?(?:\\w+\\s+)+(\\w+)\\s*\\(([^)]*)\\)\\s*(?:throws\\s+\\w+)?\\s*\\{",
+            "(?:public\\s+|private\\s+|protected\\s+)?(?:static\\s+)?(?:final\\s+)?"
+            + "(?:\\w+\\s+)+(\\w+)\\s*\\(([^)]*)\\)"
+            + "\\s*(?:throws\\s+[\\w.]+(?:\\s*,\\s*[\\w.]+)*)?"
+            + "\\s*\\{",
             Pattern.MULTILINE);
 
     private static final Pattern PKG_PATTERN = Pattern.compile(
             "^\\s*package\\s+([\\w.]+)\\s*;",
             Pattern.MULTILINE);
 
+    /**
+     * 查找 class 声明用于 Regex 路径确定方法归属父类.
+     * 最朴素的 class\s+(\w+) — 去掉 \b/^/$ 所有边界修饰, 最不容易出问题.
+     * findParentClass 在方法位置前子串里取最后一次匹配 = 最近父类.
+     */
     private static final Pattern PARENT_CLASS_PATTERN = Pattern.compile(
-            "class\\s+(\\w+)\\s*\\{?\\s*$",
-            Pattern.MULTILINE);
+            "class\\s+(\\w+)");
+
+    /** 控制语句/关键字 — 正则修饰符组回退时可能被误当方法名, 后置过滤用 */
+    private static final Set<String> METHOD_NAME_KEYWORDS = Set.of(
+            "if", "while", "for", "switch", "try", "catch", "finally",
+            "return", "throw", "new", "synchronized", "assert", "yield",
+            "do", "else", "break", "continue", "class", "interface",
+            "enum", "record", "package", "import", "public", "private",
+            "protected", "static", "final", "abstract", "native", "strictfp",
+            "transient", "volatile", "void", "int", "long", "short", "byte",
+            "char", "float", "double", "boolean", "extends", "implements",
+            "instanceof", "super", "this", "null", "true", "false",
+            "var", "permits", "sealed", "non-sealed", "when", "default",
+            "const", "goto", "case"
+    );
 
     // ============ PERF 信号检测 Pattern ============
     private static final Pattern PERF_CONCURRENT_HM = Pattern.compile("\\bConcurrentHashMap\\b|\\bConcurrentMap\\b|\\bCopyOnWriteArrayList\\b");
@@ -83,11 +110,12 @@ public class JavaParser extends AbstractParser {
 
     @Override
     public ParsingResult parseEntities(@NonNull SourceCode sourceCode) {
+        String filePath = sourceCode != null ? sourceCode.getFilePath() : "<null>";
         Future<ParsingResult> future = executor.submit(() -> {
             try {
                 return doParse(sourceCode);
             } catch (Exception e) {
-                log.error("Parse error for {}: {}", sourceCode.getFilePath(), e.getMessage());
+                log.error("Parse error for {}: {}", filePath, e.getMessage());
                 return buildFallbackResult(DataQuality.FILE, "CRASHED: " + e.getClass().getSimpleName());
             }
         });
@@ -96,10 +124,10 @@ public class JavaParser extends AbstractParser {
             return future.get(getTimeoutMs(), TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
             future.cancel(true);
-            log.warn("Parse timeout for {}: {}ms", sourceCode.getFilePath(), getTimeoutMs());
+            log.warn("Parse timeout for {}: {}ms", filePath, getTimeoutMs());
             return buildFallbackResult(DataQuality.FILE, "TIMEOUT");
         } catch (Exception e) {
-            log.error("Unexpected parse error for {}: {}", sourceCode.getFilePath(), e.getMessage());
+            log.error("Unexpected parse error for {}: {}", filePath, e.getMessage());
             return buildFallbackResult(DataQuality.FILE, "UNEXPECTED: " + e.getMessage());
         }
     }
@@ -167,7 +195,7 @@ public class JavaParser extends AbstractParser {
         return buildFallbackResult(DataQuality.FILE, remark);
     }
 
-    private com.github.javaparser.@NonNull JavaParser createAstParser() {
+    com.github.javaparser.@NonNull JavaParser createAstParser() {
         ParserConfiguration config = new ParserConfiguration();
         ParserConfiguration.LanguageLevel langLevel = ParserConfiguration.LanguageLevel.JAVA_25;
         ConfigItem<?> langConfig = getConfig(CONFIG_KEY_JAVA_LANGUAGE_LEVEL);
@@ -203,6 +231,14 @@ public class JavaParser extends AbstractParser {
             String methodName = methodMatcher.group(1);
             String params = methodMatcher.group(2).replaceAll("\\s+", "");
             String parentClass = findParentClass(content, methodMatcher.start());
+
+            // ===== 后置过滤 =====
+            // 1) 构造方法: 方法名和所在类名相同 — 正则修饰符组回退时会把 public 当返回类型,
+            //    导致 public B() {} 被误匹配为 group(1)=B.
+            if (methodName.equals(parentClass)) continue;
+            // 2) 控制语句误匹配: if (x) {} 会被回退匹配为 if(x), 方法名是关键字
+            if (METHOD_NAME_KEYWORDS.contains(methodName)) continue;
+
             String fullyQualifiedName = packageName.isEmpty()
                     ? parentClass + "#" + methodName + "(" + params + ")"
                     : packageName + "." + parentClass + "#" + methodName + "(" + params + ")";
@@ -239,42 +275,23 @@ public class JavaParser extends AbstractParser {
                 .map(NodeWithName::getNameAsString)
                 .orElse("");
 
-        cu.findAll(ClassOrInterfaceDeclaration.class).stream()
-                .filter(cls -> cls.findAncestor(ClassOrInterfaceDeclaration.class).isEmpty())
-                .forEach(cls -> {
-            String className = cls.getNameAsString();
-            String fullyQualifiedName = packageName.isEmpty()
-                    ? className
-                    : packageName + "." + className;
-
-            String classSig = buildClassSignature(cls);
+        // 统一遍历所有 ClassOrInterfaceDeclaration(顶层 + 内部 + 多层嵌套),
+        // 用 buildClassFullName 向上拼接完整 $ 链
+        cu.findAll(ClassOrInterfaceDeclaration.class).forEach(cls -> {
+            String fullName = buildClassFullName(cls, packageName);
+            String sig = buildClassSignature(cls);
             entities.add(Entity.builder()
-                    .name(fullyQualifiedName)
+                    .name(fullName)
                     .kind(EntityKind.CLASS)
-                    .signature(classSig)
+                    .signature(sig)
                     .build());
-
-            cls.findAll(ClassOrInterfaceDeclaration.class).stream()
-                    .skip(1)
-                    .forEach(innerCls -> {
-                        String innerName = innerCls.getNameAsString();
-                        String innerFullyQualified = fullyQualifiedName + "$" + innerName;
-                        String innerSig = buildClassSignature(innerCls);
-                        entities.add(Entity.builder()
-                                .name(innerFullyQualified)
-                                .kind(EntityKind.CLASS)
-                                .signature(innerSig)
-                                .build());
-                    });
         });
 
         cu.findAll(MethodDeclaration.class).forEach(method -> {
             Optional<ClassOrInterfaceDeclaration> parentClass = method.findAncestor(ClassOrInterfaceDeclaration.class);
             if (parentClass.isPresent()) {
-                String className = parentClass.get().getNameAsString();
-                String parentFullName = packageName.isEmpty()
-                        ? className
-                        : packageName + "." + className;
+                // 方法的父类全名也必须走同一 $ 拼接逻辑, 否则内部类方法名丢失外部类前缀
+                String parentFullName = buildClassFullName(parentClass.get(), packageName);
 
                 String params = method.getParameters().stream()
                         .map(p -> p.getType().asString())
@@ -291,6 +308,23 @@ public class JavaParser extends AbstractParser {
         });
 
         return entities;
+    }
+
+    /**
+     * 给定任意 ClassOrInterfaceDeclaration, 向上遍历所有祖先类,
+     * 用 $ 拼接出完整的内部类全名, 再加包名前缀.
+     * 例: Outer { Inner { Deep {} } } 中 Deep → "pkg.Outer$Inner$Deep"
+     */
+    private String buildClassFullName(@NonNull ClassOrInterfaceDeclaration cls, String packageName) {
+        List<String> names = new ArrayList<>();
+        names.add(cls.getNameAsString());
+        Optional<ClassOrInterfaceDeclaration> ancestor = cls.findAncestor(ClassOrInterfaceDeclaration.class);
+        while (ancestor.isPresent()) {
+            names.add(0, ancestor.get().getNameAsString());
+            ancestor = ancestor.get().findAncestor(ClassOrInterfaceDeclaration.class);
+        }
+        String joined = String.join("$", names);
+        return packageName.isEmpty() ? joined : packageName + "." + joined;
     }
 
     private @NonNull String buildClassSignature(@NonNull ClassOrInterfaceDeclaration cls) {
@@ -323,7 +357,7 @@ public class JavaParser extends AbstractParser {
         return returnType + ":" + params + ":" + bodyHash;
     }
 
-    private ParsingResult buildFallbackResult(DataQuality quality, String remark) {
+    ParsingResult buildFallbackResult(DataQuality quality, String remark) {
         return ParsingResult.builder()
                 .entities(Collections.emptyList())
                 .quality(quality)
@@ -583,8 +617,10 @@ public class JavaParser extends AbstractParser {
         if (code == null) {
             return "";
         }
-        return code.replaceAll("//.*", "")
-                .replaceAll("/\\*.*?\\*/", "")
+        return code.replaceAll("//[^\\n]*", "")
+                // 块注释: 先用简单嵌套 Pattern (单行), 再用 [\\s\\S] 兜底 (多行)
+                .replaceAll("/\\*[^*]*\\*+(?:[^/*][^*]*\\*+)*/", "")
+                .replaceAll("/\\*[\\s\\S]*?\\*/", "")
                 .replaceAll("\\s+", "");
     }
 
@@ -601,14 +637,19 @@ public class JavaParser extends AbstractParser {
         if (before == null || after == null) {
             return false;
         }
+        // ✅ 关键修复: replaceAll 的 replacement 里 "\\n" 会被 Matcher 误处理
+        // (反斜杠是 Matcher 特殊转义前缀, \n 非法, 结果变成字面 'n')
+        // 改成空字符串 "", 后面的 \\s+ 会处理剩余空白
         String beforeCode = before
-                .replaceAll("//[^\n]*\n?", "\n")
+                .replaceAll("//[^\\n]*\\n?", "")
                 .replaceAll("/\\*[^*]*\\*+(?:[^/*][^*]*\\*+)*/", "")
+                .replaceAll("/\\*[\\s\\S]*?\\*/", "")
                 .replaceAll("\\s+", " ")
                 .trim();
         String afterCode = after
-                .replaceAll("//[^\n]*\n?", "\n")
+                .replaceAll("//[^\\n]*\\n?", "")
                 .replaceAll("/\\*[^*]*\\*+(?:[^/*][^*]*\\*+)*/", "")
+                .replaceAll("/\\*[\\s\\S]*?\\*/", "")
                 .replaceAll("\\s+", " ")
                 .trim();
         return beforeCode.equals(afterCode);
@@ -650,17 +691,23 @@ public class JavaParser extends AbstractParser {
                             .orElse("");
 
                     for (ClassOrInterfaceDeclaration cls : cu.findAll(ClassOrInterfaceDeclaration.class)) {
-                        String className = cls.getNameAsString();
-                        String parentFullName = packageName.isEmpty() ? className : packageName + "." + className;
+                        // ✅ 类 fullName: 复用 buildClassFullName 处理 $ 嵌套路径
+                        String clsFullName = buildClassFullName(cls, packageName);
 
-                        if (parentFullName.equals(entityName)) {
+                        if (clsFullName.equals(entityName)) {
                             return extractRange(content, cls);
                         }
 
-                        for (MethodDeclaration method : cls.getMethods()) {
+                        // ✅ 方法遍历: 用 cls.findAll(MethodDeclaration.class) 包含内部类方法
+                        for (MethodDeclaration method : cls.findAll(MethodDeclaration.class)) {
                             String params = method.getParameters().stream()
                                     .map(p -> p.getType().asString())
                                     .collect(Collectors.joining(","));
+                            // ✅ 方法 parentFullName: 也走 buildClassFullName, 内部类方法带 $ 路径
+                            Optional<ClassOrInterfaceDeclaration> methodParent = method.findAncestor(ClassOrInterfaceDeclaration.class);
+                            String parentFullName = methodParent.isPresent()
+                                    ? buildClassFullName(methodParent.get(), packageName)
+                                    : clsFullName;
                             String methodFullName = parentFullName + "#" + method.getNameAsString() + "(" + params + ")";
 
                             if (methodFullName.equals(entityName)) {
@@ -676,7 +723,7 @@ public class JavaParser extends AbstractParser {
         return null;
     }
 
-    private String extractRange(String content, @NonNull Node node) {
+    String extractRange(String content, @NonNull Node node) {
         return node.getRange()
                 .map(r -> {
                     int start = posToOffset(content, r.begin.line, r.begin.column);
@@ -768,16 +815,23 @@ public class JavaParser extends AbstractParser {
         return score;
     }
 
-    private int posToOffset(@NonNull String content, int line, int column) {
+    int posToOffset(@NonNull String content, int line, int column) {
         int currentLine = 1;
         int currentCol = 1;
         for (int i = 0; i < content.length(); i++) {
             if (currentLine == line && currentCol == column) {
                 return i;
             }
-            if (content.charAt(i) == '\n') {
+            char c = content.charAt(i);
+            if (c == '\n') {
                 currentLine++;
                 currentCol = 1;
+            } else if (c == '\r') {
+                currentLine++;
+                currentCol = 1;
+                if (i + 1 < content.length() && content.charAt(i + 1) == '\n') {
+                    i++;
+                }
             } else {
                 currentCol++;
             }
